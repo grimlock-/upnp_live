@@ -3,3 +3,7 @@ local.conf
 *.log
 *.o
 *.swp
+
+# Dont't ignore these file
+!.gitignore
+!.gitattributes
