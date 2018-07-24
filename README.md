@@ -6,7 +6,7 @@ A UPnP MediaServer for mirroring live streams acquired via [StreamLink](https://
 ## Dependencies
 [libupnp](http://sourceforge.net/projects/pupnp/files/pupnp/libUPnP%201.8.3/) v1.8.3
 
-[streamlink] (https://github.com/streamlink/streamlink) - not neded for compilation, but needed for server functionality
+[streamlink](https://github.com/streamlink/streamlink) - not neded for compilation, but needed for server functionality
 
 ## Working Devices
 (Only tested with streams from Twitch.tv) The server has been tested with and confirmed to work for the following media renderers:
@@ -56,4 +56,4 @@ I would also greatly appreciate it if anyone can test upnp_live with any devices
 * When an open request is made for a stream that already has a OpenStreamHandle object, changing the StreamHandler::open callback to return a pointer to an already existing OpenStreamHandle (which is necessary for Roku TVs to play the stream) stops Sony Bravia TVs from being able to read any stream below 1080p60 quality. While Sony TVs can technically open the stream with this behavior, playback will stop after less than a second, and the one video frame that does get decoded is corrupted.
 * Child processes executing Streamlink will intermittently throw an exception when receiving SIGTERM, which causes the shutdown process to stop until a SIGKILL is received (or two more SIGTERMs which will trigger a call to exit()).
 * Occasionally, multiple pipes will be opened for a single stream (might be the cause of the video corruption for Bravia TVs)
-* Eventually, Roku TVs will, without user input, just stop playing the stream and send a close request to the server
+* Eventually, Roku TVs will, without user input, just stop playing a stream and send a close request to the server
