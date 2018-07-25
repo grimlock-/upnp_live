@@ -6,7 +6,7 @@ A UPnP MediaServer for mirroring live streams acquired via [StreamLink](https://
 ## Dependencies
 [libupnp](http://sourceforge.net/projects/pupnp/files/pupnp/libUPnP%201.8.3/) v1.8.3
 
-[streamlink](https://github.com/streamlink/streamlink) - not neded for compilation, but needed for server functionality
+[streamlink](https://github.com/streamlink/streamlink) - not neded for compilation, but needed to access remote streams
 
 ## Working Devices
 (Only tested with streams from Twitch.tv) The server has been tested with and confirmed to work for the following media renderers:
