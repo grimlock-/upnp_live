@@ -1,7 +1,7 @@
 upnp_live
 =============
 
-A UPnP MediaServer for mirroring live streams acquired via [StreamLink](https://github.com/streamlink/streamlink) (though it could theoretically work with any binary that gives the same output).
+A UPnP MediaServer for mirroring live streams acquired via [StreamLink](https://github.com/streamlink/streamlink) (though it could theoretically work with any binary that can print a stream to stdout).
 
 ## Dependencies
 [libupnp](http://sourceforge.net/projects/pupnp/files/pupnp/libUPnP%201.8.3/) v1.8.3
