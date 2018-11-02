@@ -208,8 +208,8 @@ int StreamHandler::OpenStream(OpenStreamHandle* handle)
 			exit(EXIT_FAILURE);
 		}
 		close(pipefd[0]);
-		execl("/usr/local/bin/streamlink", "streamlink", "--stdout", handle->stream->getURL().c_str(), handle->quality.c_str(), static_cast<char*>(0));
-		exit(EXIT_FAILURE); //Exit in case execl fails or the file doesn't exist
+		execlp("streamlink", "streamlink", "--stdout", handle->stream->getURL().c_str(), handle->quality.c_str(), static_cast<char*>(0));
+		exit(EXIT_FAILURE); //Exit in case execlp fails or the file doesn't exist
 	}
 	else //Parent
 	{

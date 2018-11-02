@@ -46,7 +46,6 @@ I would also greatly appreciate it if anyone can test upnp_live with any devices
 * Store stream AV data in a temporary file or buffer instead of just reading from the pipe to streamlink (and maybe do away with the virtual directory callbacks entirely)
 * Also don't immediately delete said files whenever close() is called since clients tend to rapidly open and close a file if they have trouble reading them.
 * Add pthread locks for the list of currently open streams to prevent race conditions
-* Change execl in StreamHandler to a different function that will search the PATH environment variable for the binary
 
 #### Features
 * Centralize logging and make it abide by the log level setting

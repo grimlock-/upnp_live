@@ -91,8 +91,8 @@ void Stream::populateStreams()
 		}
 		else
 		{
-			std::cout << "Unknown output getting stream quality levels:\n" << output << std::endl;
-			stream_is_live = false;
+			this->addResolution(output);
+			stream_is_live = true;
 		}
 		/*size_t com1 = 0, com2 = output.find(',');
 		if(com2 == std::string::npos)
