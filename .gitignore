@@ -1,5 +1,5 @@
 upnp_live
-local.conf
+upnp_live.conf
 *.log
 *.o
 *.swp

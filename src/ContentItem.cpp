@@ -1,13 +1,5 @@
 #include "ContentItem.h"
 using namespace upnp_live;
 
-ContentItem::ContentItem()
-{
-}
-
-ContentItem::~ContentItem()
-{
-}
-
-int ContentItem::getURIID() {return uriId;}
-std::string ContentItem::getResourceURI() {return resourceUri;}
+int ContentItem::GetUriId() {return uriId;}
+std::string ContentItem::GetResourceURI() {return resourceUri;}

@@ -1,37 +1,81 @@
-#pragma once
+#ifndef CONTENTDIRECTORYSERVICE_H
+#define CONTENTDIRECTORYSERVICE_H
+
+#include <string>
+#include <shared_mutex>
+#include <unordered_map>
+#include <thread>
+#include <atomic>
 #include <upnp/upnp.h>
+#include "Logging.h"
 #include "Stream.h"
 
 namespace upnp_live {
 
-class Server;
-
 class ContentDirectoryService
 {
 	public:
-		ContentDirectoryService(Server*);
+		ContentDirectoryService();
+		ContentDirectoryService(std::string name);
 		~ContentDirectoryService();
-		void executeAction(UpnpActionRequest*);
-		void addStream(const char*);
-		void addStreams(const std::vector<std::string> &);
-		void removeStream(Stream&);
-		int getStreamCount();
-		Stream* getStream(unsigned int);
-		Stream* getStreamByURL(std::string);
-	private:
+		void Heartbeat();
+		void ExecuteAction(UpnpActionRequest* request);
+		bool AddStream(std::shared_ptr<Stream>& stream);
+		void RemoveStream(std::string name);
+		bool AddFile(std::string name, std::string mimetype, std::string path);
+		void RemoveFile(std::string name);
+		
+		std::string GetItemXML(std::string objId);
+	protected:
+		struct CDResource
+		{
+			std::string name;
+			std::string mime_type;
+			bool video;
+			std::string path;
+		};
 		//Vars
-		std::vector<Stream> streams;
-		Server* server;
-		//Server serverInstance;
+		std::string serverName;
+		std::unordered_map<std::string, std::shared_ptr<Stream>> streams;
+		std::shared_timed_mutex streamContainerMutex;
+		std::unordered_map<std::string, CDResource> liveStreams;
+		std::shared_timed_mutex liveContainerMutex;
+		std::unordered_map<std::string, CDResource> files;
+		std::shared_timed_mutex fileContainerMutex;
+		Logger* logger;
+		std::thread heartbeatThread;
+		std::atomic<bool> heartbeatRunning {false};
+		
+		unsigned int nextId = 0;
 		//Functions
-		//Browse(objectID, browseFlag, filter, startingIndex, requestedCount, sortCriteria)
-		std::string browse(std::string, std::string, std::string, int, int, std::string);
-		std::string getSearchCapabilities();
-		std::string getSortCapabilities();
-		std::string getFeatureList();
-		std::string getSystemUpdateID();
-		std::string getServiceResetToken();
+		std::string browse(
+			std::string objId,
+			std::string browseFlag,
+			std::string filter,
+			int startingIndex,
+			int requestedCount,
+			std::string sortCriteria
+		);
+		std::string browseMetadata(
+			std::string objectId,
+			std::string filter,
+			std::string sortCriteria
+		);
+		std::string browseDirectChildren(
+			std::string objId,
+			std::string filter,
+			int startingIndex,
+			int requestedCount,
+			std::string sortCriteria
+		);
+		std::string GetBaseUrl();
 		std::string errorXML(int, const char*);
+		std::string streamContainerXML();
+		std::string fileContainerXML();
+		std::string getItemXML(CDResource item, std::string parent);
+		void setStreamStatus(bool isLive);
 };
 
 }
+
+#endif /* CONTENTDIRECTORYSERVICE_H */

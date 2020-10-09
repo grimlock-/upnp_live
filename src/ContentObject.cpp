@@ -1,18 +1,17 @@
 #include "ContentObject.h"
 using namespace upnp_live;
 
-ContentObject::ContentObject() {}
-ContentObject::~ContentObject() {}
+ContentObject::~ContentObject(){}
 
-//Set functions
-void ContentObject::setID(int id) {objectId = id;}
-void ContentObject::setParentID(int id) {parentId = id;}
-void ContentObject::setTitle(std::string newTitle) {title = newTitle;}
-void ContentObject::setUPNPClass(std::string newClass) {upnpClass = newClass;}
+//Setters
+void ContentObject::SetID(std::string id) {objectId = id;}
+void ContentObject::SetParentID(std::string id) {parentId = id;}
+void ContentObject::SetTitle(std::string newTitle) {title = newTitle;}
+void ContentObject::SetUPNPClass(std::string newClass) {upnpClass = newClass;}
 
-//Get functions
-int ContentObject::getObjectID() {return objectId;}
-int ContentObject::getParentID() {return parentId;}
-bool ContentObject::isRestricted() {return true;}
-std::string ContentObject::getTitle() {return title;}
-std::string ContentObject::getUPNPClass() {return upnpClass;}
+//Getters and Isses
+bool ContentObject::IsRestricted() {return true;}
+std::string ContentObject::GetObjectID() {return objectId;}
+std::string ContentObject::GetParentID() {return parentId;}
+std::string ContentObject::GetTitle() {return title;}
+std::string ContentObject::GetUpnpClass() {return upnpClass;}

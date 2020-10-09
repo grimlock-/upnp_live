@@ -2,5 +2,5 @@
 using namespace upnp_live;
 
 ContentContainer::ContentContainer() : ContentObject(), childCount(0) {}
-ContentContainer::~ContentContainer() {}
-unsigned int ContentContainer::getChildCount() {return childCount;}
+
+unsigned int ContentContainer::GetChildCount() {return childCount;}

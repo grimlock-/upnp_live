@@ -1,0 +1,23 @@
+Gerbera/MT defaults
+audio buffer size: 1MB/1,048,576
+audio chunk size: 131KB/131,072
+audio fill size: 262KB/262,144
+
+
+video buffer size: 14MB/14,400,000
+video chunk size: 512KB/512,000
+video fill size: 120KB/120,000
+
+
+MPC-HC request size: 1MB/1,048,576
+VLC request size: 1MB/1,048,576
+
+
+Streamlink default: 16MB
+
+
+TeamSp00ky stream (of any significant duration) is ~8000 kb/s (so 8 mb/s aka 1 MB/s) for vid and 128 kb/s for audio
+Copying 1 second (1.32 seconds technically) gives ~12000 kb/s (so 12 mb/s aka ~1.5MB/s) for vid and 130 kb/s for audio
+That 1 second file's size is just barely under 2MB, which seems to match up with the numbers above
+as such, a 30s buffer for a sp00ky stream = ~31MB, meaning gerbera/MT has around a 15 second buffer for transcoding
+for audio, 1MB will hold a bit over a minute of 128kb CBR lossy audio and between 7 and 16 seconds of flac (bitrates from 1200kbps to 500kbps)

@@ -1,90 +1,150 @@
 #include <iostream>
 #include <sstream>
-#include <string>
-#include <assert.h>
+#include <mutex>
 #include <strings.h> //strncasecmp
 #include "ContentDirectoryService.h"
-#include "Server.h"
-#include "Exceptions.h"
 #include "util.h"
 using namespace upnp_live;
 
-ContentDirectoryService::ContentDirectoryService(Server* srv) : server(srv)
+ContentDirectoryService::ContentDirectoryService(std::string name) : serverName(name)
 {
-	/*Stream s1("twitch.tv/meleeeveryday"), s2("twitch.tv/monstercat");
-	streams.push_back(s1);
-	streams.push_back(s2);
-	streams[0].setID(1);
-	streams[1].setID(2);
+	if(serverName.empty())
+		serverName = "upnp_live";
+	logger = Logger::GetLogger();
 
-	std::stringstream baseURI;
-	baseURI << "http://" << server->getAddress() << ":" << server->getPort() << "/res/";
-	streams[0].setBaseResURI(baseURI.str());
-	streams[1].setBaseResURI(baseURI.str());*/
-	/*addStream("twitch.tv/sakgamingtv");
-	addStream("twitch.tv/monstercat");*/
+	heartbeatRunning = true;
+	heartbeatThread = std::thread(&ContentDirectoryService::Heartbeat, this);
 }
-
 ContentDirectoryService::~ContentDirectoryService()
 {
-	streams.clear();
+	heartbeatRunning = false;
+	if(heartbeatThread.joinable())
+		heartbeatThread.join();
+}
+
+bool ContentDirectoryService::AddStream(std::shared_ptr<Stream>& stream)
+{
+	std::unique_lock<std::shared_timed_mutex> lock1(streamContainerMutex, std::defer_lock);
+	std::unique_lock<std::shared_timed_mutex> lock2(liveContainerMutex, std::defer_lock);
+	std::lock(lock1, lock2);
+	return streams.emplace(std::make_pair(stream->Name, stream)).second;
+}
+void ContentDirectoryService::RemoveStream(std::string name)
+{
+	std::unique_lock<std::shared_timed_mutex> lock1(streamContainerMutex, std::defer_lock);
+	std::unique_lock<std::shared_timed_mutex> lock2(liveContainerMutex, std::defer_lock);
+	std::lock(lock1, lock2);
+	streams.erase(name);
+	liveStreams.erase(name);
+}
+bool ContentDirectoryService::AddFile(std::string name, std::string mimetype, std::string path)
+{
+	CDResource newItem;
+	newItem.name = name;
+	newItem.mime_type = mimetype;
+	newItem.path = path;
+	while(newItem.path.back() == '/')
+		newItem.path.pop_back();
+	if(strncasecmp(mimetype.c_str(), "video", 5) == 0)
+		newItem.video = true;
+	else
+		newItem.video = false;
+
+	std::unique_lock<std::shared_timed_mutex> lock(fileContainerMutex);
+	return files.emplace(std::make_pair(name, newItem)).second;
+}
+void ContentDirectoryService::RemoveFile(std::string name)
+{
+	std::unique_lock<std::shared_timed_mutex> lock(fileContainerMutex);
+	files.erase(name);
 }
 
 
 
 
-void ContentDirectoryService::addStream(const char* url)
+void ContentDirectoryService::Heartbeat()
 {
-	Stream newStream(url);
-	std::stringstream baseURI;
-	baseURI << "http://" << server->getAddress() << ":" << server->getPort() << "/res/";
-	newStream.setID(streams.size()+1);
-	newStream.setBaseResURI(baseURI.str());
-	streams.push_back(newStream);
+	std::this_thread::sleep_for(std::chrono::seconds(5));
+	while(heartbeatRunning.load())
+	{
+		{
+			std::shared_lock<std::shared_timed_mutex> lock1(streamContainerMutex, std::defer_lock);
+			std::shared_lock<std::shared_timed_mutex> lock2(liveContainerMutex, std::defer_lock);
+			std::lock(lock1, lock2);
+			for(auto& stream : streams)
+			{
+				bool isLive = stream.second->IsLive();
+				if(liveStreams.find(stream.second->Name) == liveStreams.end())
+				{
+					if(isLive)
+					{
+						logger->Log_cc(info, 3, "Adding ", stream.second->Name.c_str(), " to content directory\n");
+						CDResource newItem;
+						newItem.name = stream.second->Name;
+						newItem.mime_type = stream.second->GetMimeType();
+						if(strncasecmp(stream.second->GetMimeType().c_str(), "video", 5) == 0)
+							newItem.video = true;
+						else
+							newItem.video = false;
+						liveStreams.insert(std::make_pair(stream.second->Name, newItem));
+					}
+				}
+				else
+				{
+					if(!isLive)
+					{
+						logger->Log_cc(info, 3, "Removing ", stream.second->Name.c_str(), " from content directory\n");
+						liveStreams.erase(stream.second->Name);
+					}
+				}
+			}
+		}
+		//FIXME - Do a smaller wait time here with a duration calculation like the stream heartbeat to respond faster to a shutdown signal
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+	}
 }
-void ContentDirectoryService::addStreams(const std::vector<std::string> &urls)
+
+
+
+
+void ContentDirectoryService::ExecuteAction(UpnpActionRequest* request)
 {
-	for(unsigned int i = 0; i < urls.size(); i++)
-		addStream(urls[i].c_str());
-}
-void ContentDirectoryService::executeAction(UpnpActionRequest* request)
-{
-	std::string ActionName = UpnpString_get_String(UpnpActionRequest_get_ActionName(request));
+	std::string actionName = UpnpString_get_String(UpnpActionRequest_get_ActionName(request));
 	DOMString requestXML = ixmlDocumenttoString(UpnpActionRequest_get_ActionRequest(request));
 	if(requestXML == nullptr)
 	{
-		std::cerr << "[ContentDirectoryService] Error converting action to string\n";
+		logger->Log_cc(error, 3, "[ContentDirectoryService] Error converting ", actionName.c_str(), " action to string\n");
 		return;
 	}
 	else
 	{
-		std::cout << "[ContentDirectoryService] Recieved action: " << ActionName << "\n" << requestXML << std::endl;
+		logger->Log_cc(debug, 5, "[ContentDirectoryService] Recieved action: ", actionName.c_str(), "\n", requestXML, "\n");
 		ixmlFreeDOMString(requestXML);
 	}
-
+	
 	std::string responseXML;
 	IXML_Document* response;
-	if(ActionName == "GetSearchCapabilities")
+	if(actionName == "GetSearchCapabilities")
 	{
-		responseXML = getSearchCapabilities();
+		responseXML = "<SearchCaps></SearchCaps>\n";
 	}
-	else if(ActionName == "GetSortCapabilities")
+	else if(actionName == "GetSortCapabilities")
 	{
-		responseXML = getSortCapabilities();
+		responseXML = "<SortCaps></SortCaps>\n";
 	}
-	else if(ActionName == "GetFeatureList")
+	else if(actionName == "GetFeatureList")
 	{
-		responseXML = getFeatureList();
+		responseXML = "<Features></Features>\n";
 	}
-	else if(ActionName == "GetSystemUpdateID")
+	else if(actionName == "GetSystemUpdateID")
 	{
-		responseXML = getSystemUpdateID();
+		responseXML = "<Id>0</Id>\n";
 	}
-	else if(ActionName == "GetServiceResetToken")
+	else if(actionName == "GetServiceResetToken")
 	{
-		responseXML = getServiceResetToken();
+		responseXML = "<ResetToken>0</ResetToken>\n";
 	}
-	else if(ActionName == "Browse")
+	else if(actionName == "Browse")
 	{
 		IXML_NodeList* nodes;
 		IXML_Node* node;
@@ -93,7 +153,7 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		nodes = ixmlDocument_getElementsByTagName(UpnpActionRequest_get_ActionRequest(request), "ObjectID");
 		if(nodes == nullptr || nodes->nodeItem == nullptr || nodes->nodeItem->firstChild == nullptr)
 		{
-			std::cout << "[ContentDirectoryService] Could not find ObjectID" << std::endl;
+			logger->Log(error, "[ContentDirectoryService] Could not get ObjectID from request\n");
 			return;
 		}
 		node = nodes->nodeItem->firstChild;
@@ -102,7 +162,7 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		nodes = ixmlDocument_getElementsByTagName(UpnpActionRequest_get_ActionRequest(request), "BrowseFlag");
 		if(nodes == nullptr || nodes->nodeItem == nullptr || nodes->nodeItem->firstChild == nullptr)
 		{
-			std::cout << "[ContentDirectoryService] Could not find BrowseFlag" << std::endl;
+			logger->Log(error, "[ContentDirectoryService] Could not find BrowseFlag from request\n");
 			return;
 		}
 		node = nodes->nodeItem->firstChild;
@@ -111,8 +171,6 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		nodes = ixmlDocument_getElementsByTagName(UpnpActionRequest_get_ActionRequest(request), "Filter");
 		if(nodes == nullptr || nodes->nodeItem == nullptr || nodes->nodeItem->firstChild == nullptr)
 		{
-			//std::cout << "[ContentDirectoryService] Could not find Filter" << std::endl;
-			//return;
 			filter = "";
 		}
 		else
@@ -124,7 +182,7 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		nodes = ixmlDocument_getElementsByTagName(UpnpActionRequest_get_ActionRequest(request), "StartingIndex");
 		if(nodes == nullptr || nodes->nodeItem == nullptr || nodes->nodeItem->firstChild == nullptr)
 		{
-			std::cout << "[ContentDirectoryService] Could not find StartingIndex" << std::endl;
+			logger->Log(error, "[ContentDirectoryService] Could not find StartingIndex from request\n");
 			return;
 		}
 		node = nodes->nodeItem->firstChild;
@@ -133,7 +191,7 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		nodes = ixmlDocument_getElementsByTagName(UpnpActionRequest_get_ActionRequest(request), "RequestedCount");
 		if(nodes == nullptr || nodes->nodeItem == nullptr || nodes->nodeItem->firstChild == nullptr)
 		{
-			std::cout << "[ContentDirectoryService] Could not find RequestedCount" << std::endl;
+			logger->Log(error, "[ContentDirectoryService] Could not find RequestedCount from request\n");
 			return;
 		}
 		node = nodes->nodeItem->firstChild;
@@ -154,19 +212,21 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		{
 			responseXML = browse(objID, browseFlag, filter, startingIndex, requestedCount, sortCriteria);
 		}
-		catch(ActionException e)
+		catch(std::pair<int, const char*> err)
 		{
-			std::cout << "Caught exception handling action request: " << ActionName << std::endl;
-			UpnpActionRequest_set_ErrCode(request, e.getErrorCode());
+			logger->Log_cc(error, 3, "Error handling action request: ", actionName.c_str(), "\n");
+			logger->Log_cc(error, 5, "Error ", std::to_string(err.first).c_str(), " ", err.second, "\n");
+			UpnpActionRequest_set_ErrCode(request, err.first);
 			UpnpString* errorString = UpnpString_new();
-			UpnpString_set_String(errorString, e.getMessage().c_str());
+			UpnpString_set_String(errorString, err.second);
 			UpnpActionRequest_set_ErrStr(request, errorString);
-			std::cout << "Error code: " << e.getErrorCode() << "\nError message: " << e.getMessage() << std::endl;
+			responseXML = errorXML(err.first, err.second);
+			return;
 		}
 	}
 	else
 	{
-		std::cout << "Unknown action request: " << ActionName << std::endl;
+		logger->Log_cc(info, 3, "Unknown action request: ", actionName.c_str(), "\n");
 		UpnpActionRequest_set_ErrCode(request, 401);
 		UpnpString* errorString = UpnpString_new();
 		UpnpString_set_String(errorString, "Invalid Action");
@@ -174,34 +234,40 @@ void ContentDirectoryService::executeAction(UpnpActionRequest* request)
 		responseXML = errorXML(401, "Invalid Action");
 		return;
 	}
-	if(responseXML == "")
-		return;
 
 	if(UpnpActionRequest_get_ErrCode(request) == 0)
 	{
 		std::stringstream ss;
-		ss << "<u:" << ActionName << "Response xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">\n" << \
-		responseXML << "</u:" << ActionName << "Response>\n";
+		ss << "<u:" << actionName << "Response xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">\n" << \
+		responseXML << "</u:" << actionName << "Response>\n";
 		responseXML = ss.str();
 	}
 
 	int ret = ixmlParseBufferEx(responseXML.c_str(), &response);
 	if(ret != IXML_SUCCESS)
-		std::cout << "[ContentDirectoryService] Error " << ret << " converting response XML into document\n" << responseXML << std::endl;
+	{
+		logger->Log_cc(error, 5, "[ContentDirectoryService] Error ", std::to_string(ret).c_str(), " converting response XML into document\n", responseXML.c_str(), "\n");
+	}
 	else
 	{
 		UpnpActionRequest_set_ActionResult(request, response);
 		DOMString finishedXML = ixmlDocumenttoString(response);
-		std::cout << "Finished response:\n" << finishedXML << std::endl;
+		logger->Log_cc(debug, 3, "Finished response:\n", finishedXML, "\n");
 		ixmlFreeDOMString(finishedXML);
 	}
 }
 
-std::string ContentDirectoryService::browse(std::string objID, std::string browseFlag, std::string filter, int startingIndex, int requestedCount, std::string sortCriteria)
+std::string ContentDirectoryService::browse(
+	std::string objID,
+	std::string browseFlag,
+	std::string filter,
+	int startingIndex,
+	int requestedCount,
+	std::string sortCriteria)
 {
 	int numReturned = 0;
 	int totalMatches = 0;
-	std::string resultBody = "";
+	std::string resultBody;
 
 	if(browseFlag == "BrowseMetadata")
 	{
@@ -210,157 +276,53 @@ std::string ContentDirectoryService::browse(std::string objID, std::string brows
 		numReturned = 1;
 		totalMatches = 1;
 
-		if(objID.find("-") == std::string::npos)
-		{
-			int id = stoi(objID);
-			switch(id)
-			{
-				case 0:
-					resultBody = \
-					"<container id=\"0\" parentID=\"-1\" childCount=\"NUM\" restricted=\"1\" searchable=\"0\">\n" \
-						"<dc:title>NAME</dc:title>\n" \
-						"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-					"</container>\n";
-					resultBody.replace(resultBody.find("NUM"), 3, std::to_string(streams.size()));
-					resultBody.replace(resultBody.find("NAME"), 4, server->getFriendlyName());
-					break;
-				default:
-					Stream* stream = getStream(id-1);
-					if(stream != nullptr)
-						resultBody = stream->getMetadataXML();
-					break;
-			}
-		}
-		else
-		{
-			int streamID = stoi(objID.substr(0, objID.find_first_of("-")));
-			int childID = stoi(objID.substr(objID.find_first_of("-")+1));
-			Stream* stream = getStream(streamID-1);
-			if(stream != nullptr)
-				resultBody = stream->getChildXML(childID-1);
-		}
-		/*else if(objID == "1")
-		{
-			resultBody = \
-			"<container id=\"1\" parentID=\"0\" childCount=\"1\" restricted=\"1\" searchable=\"0\">\n" \
-				"<dc:title>twitch.tv/sakgamingtv</dc:title>\n" \
-				"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-			"</container>\n";
-		}
-		else if(objID == "2")
-		{
-			resultBody = \
-			"<container id=\"2\" parentID=\"0\" childCount=\"1\" restricted=\"1\" searchable=\"0\">\n" \
-				"<dc:title>twitch.tv/monstercat</dc:title>\n" \
-				"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-			"</container>\n";
-		}
-		else if(objID.find("1-") != std::string::npos)
-		{
-			int child = std::stoi(objID.substr(objID.find("1-")+2));
-			resultBody = streams[0].getChildXML(child-1);
-		}
-		else if(objID.find("2-") != std::string::npos)
-		{
-			int child = std::stoi(objID.substr(objID.find("2-")+2));
-			resultBody = streams[1].getChildXML(child-1);
-		}
-		else
-		{
-			std::string s = "Invalid ObjectID: ";
-			s += objID;
-			s += "\n";
-			throw ActionException(701, s.c_str());
-		}*/
+		std::shared_lock<std::shared_timed_mutex> streamLock(streamContainerMutex, std::defer_lock);
+		std::shared_lock<std::shared_timed_mutex> fileLock(fileContainerMutex, std::defer_lock);
+		std::lock(streamLock, fileLock);
+		resultBody = browseMetadata(objID, filter, sortCriteria);
 	}
 	else if(browseFlag == "BrowseDirectChildren")
 	{
+		std::shared_lock<std::shared_timed_mutex> streamLock(streamContainerMutex, std::defer_lock);
+		std::shared_lock<std::shared_timed_mutex> fileLock(fileContainerMutex, std::defer_lock);
+		std::lock(streamLock, fileLock);
+
+		if(requestedCount == 0)
+			requestedCount = 999;
+		
 		if(objID == "0")
 		{
-			int itemsLeft = requestedCount;
-			for(unsigned int i = startingIndex; i < streams.size() && itemsLeft > 0; i++,itemsLeft--,numReturned++)
-			{
-				resultBody += getStream(i)->getMetadataXML();
-			}
-			totalMatches = streams.size();
+			totalMatches = 2;
+			if(startingIndex == 0 && requestedCount > 1)
+				numReturned = 2;
+			else if(startingIndex <= 1)
+				numReturned = 1;
+		}
+		else if(objID == "streams")
+		{
+			totalMatches = liveStreams.size();
+			numReturned = requestedCount;
+			if(totalMatches - startingIndex < requestedCount)
+				numReturned = totalMatches - startingIndex;
+		}
+		else if(objID == "files")
+		{
+			totalMatches = files.size();
+			numReturned = requestedCount;
+			if(totalMatches - startingIndex < requestedCount)
+				numReturned = totalMatches - startingIndex;
 		}
 		else
 		{
-			Stream* stream = getStream(std::stoi(objID)-1);
-			if(stream == nullptr)
-			{
-				std::string s = "Invalid ObjectID: ";
-				s += objID;
-				s += "\n";
-				throw ActionException(701, s.c_str());
-			}
-			totalMatches = stream->getChildCount();
-			int itemsLeft = requestedCount;
-			for(int i = startingIndex; i < stream->getChildCount() && itemsLeft > 0; i++,itemsLeft--,numReturned++)
-			{
-				resultBody += stream->getChildXML(i);
-			}
+			throw std::make_pair(701, "Bad object ID. Must be \"0\", \"streams\", or \"files\"");
 		}
 
-
-		/*switch(std::stoi(objID))
-		{
-			case 0:
-				if(startingIndex == 0)
-				{
-					resultBody = \
-					"<container id=\"1\" parentID=\"0\" childCount=\"5\" restricted=\"1\">\n" \
-						"<dc:title>twitch.tv/sakgamingtv</dc:title>\n" \
-						"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-					"</container>\n";
-					numReturned = 1;
-					if(requestedCount != 1)
-					{
-						resultBody += \
-						"<container id=\"2\" parentID=\"0\" childCount=\"5\" restricted=\"1\">\n" \
-							"<dc:title>twitch.tv/monstercat</dc:title>\n" \
-							"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-						"</container>\n";
-						numReturned++;
-					}
-				}
-				else if(startingIndex == 1)
-				{
-					resultBody = \
-					"<container id=\"2\" parentID=\"0\" childCount=\"5\" restricted=\"1\">\n" \
-						"<dc:title>twitch.tv/monstercat</dc:title>\n" \
-						"<upnp:class>object.container.storageFolder</upnp:class>\n" \
-					"</container>\n";
-					numReturned = 1;
-				}
-				else
-				{
-					resultBody = "";
-					numReturned = 0;
-				}
-				totalMatches = 2;
-			break;
-
-			case 1:
-				resultBody = streams[0].getChildrenXML(requestedCount, startingIndex, numReturned);
-				if(strncasecmp(resultBody.c_str(), "error", 5) == 0) throw ActionException(600, resultBody.c_str());
-				totalMatches = streams[0].getChildCount();
-			break;
-
-			case 2:
-				resultBody = streams[1].getChildrenXML(requestedCount, startingIndex, numReturned);
-				if(strncasecmp(resultBody.c_str(), "error", 5) == 0) throw ActionException(600, resultBody.c_str());
-				totalMatches = streams[1].getChildCount();
-			break;
-
-			default:
-				std::string s = "Invalid ObjectID: ";
-				s += objID;
-				s += "\n";
-				throw ActionException(701, s.c_str());
-			break;
-		}*/
+		/*if(startingIndex >= totalMatches)
+			throw std::make_pair(601, "Invalid starting index");*/
+		
+		resultBody = browseDirectChildren(objID, filter, startingIndex, requestedCount, sortCriteria);
 	}
+	
 	resultBody.insert(0, "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">\n");
 	resultBody += "</DIDL-Lite>\n";
 
@@ -374,61 +336,114 @@ std::string ContentDirectoryService::browse(std::string objID, std::string brows
 	"<UpdateID>0</UpdateID>\n";
 	return ss.str();
 }
-
-
-
-//GET functions
-std::string ContentDirectoryService::getSearchCapabilities()
+std::string ContentDirectoryService::browseMetadata(
+	std::string objectId, 
+	std::string filter, 
+	std::string sortCriteria)
 {
-	std::string s = "<SearchCaps></SearchCaps>\n";
-	return s;
-}
-std::string ContentDirectoryService::getSortCapabilities()
-{
-	std::string s = "<SortCaps></SortCaps>\n";
-	return s;
-}
-std::string ContentDirectoryService::getFeatureList()
-{
-	std::string s = "<Features></Features>\n";
-	return s;
-}
-std::string ContentDirectoryService::getSystemUpdateID()
-{
-	std::string s = "<Id>0</Id>\n";
-	return s;
-}
-std::string ContentDirectoryService::getServiceResetToken()
-{
-	std::string s = "<ResetToken>0</ResetToken>\n";
-	return s;
-}
-//TODO - Do something to stop race conditions
-int ContentDirectoryService::getStreamCount()
-{
-	return streams.size();
-}
-Stream* ContentDirectoryService::getStream(unsigned int index)
-{
-	if(index >= streams.size())
-		return nullptr;
-	else
-		return &(streams[index]);
-}
-Stream* ContentDirectoryService::getStreamByURL(std::string url)
-{
-	std::vector<Stream>::iterator i = streams.begin();
-	while(i != streams.end())
+	std::string ret;
+	if(objectId == "0")
 	{
-		if(i->getURL() == url)
-			return &(*i);
+		std::stringstream ss;
+		ss << "<container id=\"0\" parentID=\"-1\" childCount=\"2\" restricted=\"1\" searchable=\"0\">\n" \
+			"<dc:title>" << serverName << "</dc:title>\n" \
+			"<upnp:class>object.container.storageFolder</upnp:class>\n" \
+		"</container>\n";
+		ret = ss.str();
 	}
-	return nullptr;
+	else if(objectId == "streams")
+	{
+		std::stringstream ss;
+		ss << "<container id=\"streams\" parentID=\"0\" childCount=\"" << liveStreams.size() << "\" restricted=\"1\" searchable=\"0\">\n" \
+			"<dc:title>Streams</dc:title>\n" \
+			"<upnp:class>object.container.storageFolder</upnp:class>\n" \
+		"</container>\n";
+		ret = ss.str();
+	}
+	else if(objectId == "files")
+	{
+		std::stringstream ss;
+		ss << "<container id=\"files\" parentID=\"0\" childCount=\"" << files.size() << "\" restricted=\"1\" searchable=\"0\">\n" \
+			"<dc:title>Files</dc:title>\n" \
+			"<upnp:class>object.container.storageFolder</upnp:class>\n" \
+		"</container>\n";
+		ret = ss.str();
+	}
+	else
+	{
+		ret = GetItemXML(objectId);
+	}
+	
+	return ret;
 }
 
+std::string ContentDirectoryService::browseDirectChildren
+(
+	std::string objID,
+	std::string filter,
+	int startingIndex,
+	int requestedCount,
+	std::string sortCriteria)
+{
+	if(objID == "0")
+	{
+		std::stringstream ss;
+		if(startingIndex == 0)
+		{
+			ss << streamContainerXML();
+			if(requestedCount > 1)
+				ss << fileContainerXML();
+		}
+		else if(startingIndex == 1)
+		{
+			ss << fileContainerXML();
+		}
+		return ss.str();
+	}
+	else if(objID == "streams")
+	{
+		std::stringstream ss;
+		//FIXME - use a regular for loop here
+		for(auto& item : liveStreams)
+		{
+			if(startingIndex-- > 0)
+				continue;
 
+			ss << getItemXML(item.second, objID);
 
+			if(--requestedCount == 0)
+				break;
+		}
+		return ss.str();
+	}
+	else if(objID == "files")
+	{
+		std::stringstream ss;
+		//FIXME - use a regular for loop here
+		for(auto& item : files)
+		{
+			if(startingIndex-- > 0)
+				continue;
 
+			ss << getItemXML(item.second, objID);
+
+			if(--requestedCount == 0)
+				break;
+		}
+		return ss.str();
+	}
+	else
+	{
+		throw std::make_pair(710, "Bad container ID");
+	}
+}
+
+std::string ContentDirectoryService::GetBaseUrl()
+{
+	std::stringstream ss;
+	ss << "http://" << UpnpGetServerIpAddress() << ":" << UpnpGetServerPort() << "/";
+	return ss.str();
+}
 std::string ContentDirectoryService::errorXML(int errorCode, const char* errorMessage)
 {
 	std::stringstream ss;
@@ -443,5 +458,55 @@ std::string ContentDirectoryService::errorXML(int errorCode, const char* errorMe
 			"</UPnPError>\n" \
 		"</detail>\n" \
 	"</s:Fault>\n";
+	return ss.str();
+}
+std::string ContentDirectoryService::streamContainerXML()
+{
+	std::stringstream ss;
+	ss << "<container id=\"streams\" parentID=\"0\" childCount=\"" << liveStreams.size() << "\" restricted=\"1\" searchable=\"0\">\n" << \
+		"<dc:title>Streams</dc:title>\n" << \
+		"<upnp:class>object.container.storageFolder</upnp:class>\n" << \
+	"</container>\n";
+	return ss.str();
+}
+std::string ContentDirectoryService::fileContainerXML()
+{
+	std::stringstream ss;
+	ss << "<container id=\"files\" parentID=\"0\" childCount=\"" << files.size() << "\" restricted=\"1\" searchable=\"0\">\n" << \
+		"<dc:title>Files</dc:title>\n" << \
+		"<upnp:class>object.container.storageFolder</upnp:class>\n" << \
+	"</container>";
+	return ss.str();
+	
+}
+std::string ContentDirectoryService::GetItemXML(std::string objId)
+{
+	std::string parent;
+	
+	auto it = liveStreams.find(objId);
+	if(it != liveStreams.end())
+		parent = "streams";
+	else if((it = files.find(objId)) != files.end())
+		parent = "files";
+	else
+		throw std::make_pair(701, "Object not found");
+
+	return getItemXML(it->second, parent);
+}
+std::string ContentDirectoryService::getItemXML(CDResource item, std::string parent)
+{
+	std::string upnpClass = item.video ? "object.item.videoItem" : "object.item.audioItem";
+	std::stringstream ss;
+	ss << "<item id=\"" << item.name << "\" parentID=\"" << parent << "\" restricted=\"1\">\n" \
+		"<dc:title>" << item.name << "</dc:title>\n" \
+		"<upnp:class>" << upnpClass << "</upnp:class>\n" \
+		"<res id=\"" << item.name << "-res\" protocolInfo=\"http-get:*:" << item.mime_type << ":*\">" << \
+			GetBaseUrl();
+		if(item.path.empty())
+			ss << "res/" << util::EscapeURI(item.name);
+		else
+			ss << util::EscapeURI(item.path);
+		ss << "</res>\n" \
+	"</item>\n";
 	return ss.str();
 }

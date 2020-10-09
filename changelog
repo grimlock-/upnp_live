@@ -1,0 +1,39 @@
+v0.2
+Added handlers to compartmentalize grabbing AV data
+Restructure to not depend on StreamLink specifically
+Restructure to allow one stream handle to be read by multiple clients
+Added ability to use external program to transcode AV data
+Added basic media file serving functionality (only audio and video)
+Added logging settings
+Content Directory service now automatically updates as streams start and stop
+Removed config option
+  *url
+Added config options
+  *Global options
+    *background (daemon alias)
+    *interface
+    *loglevel
+    *webroot
+  *Stream options
+    *media
+    *status
+    *transcode
+    *mimetype
+    *buffer
+  *File options
+    *path
+    *mimetype
+Added AV handlers:
+  *ext/cmd
+  *file
+Added status handler:
+  *ext/cmd
+
+
+v0.1
+First working version
+Config options (that actually did anything)
+  *url
+  *address
+  *daemon
+  *port

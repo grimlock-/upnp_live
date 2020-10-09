@@ -16,7 +16,7 @@
 		<modelName>upnp_live</modelName>
 		<modelDescription>UPnP Server for internet live streams</modelDescription>
 		<modelNumber></modelNumber>
-		<serialNumber>1</serialNumber>
+		<serialNumber></serialNumber>
 		<UDN>uuid:c233aef9-6f97-4153-89db-440f3daac684</UDN>
 		<iconList>
 			<icon>

@@ -1,256 +1,222 @@
-#include "Stream.h"
-#include "util.h"
 #include <iostream>
+#include <stdexcept>
 #include <sstream>
-#include <unistd.h>
-#include <limits> //max int
-#include <sys/wait.h>
 #include <strings.h> //strncasecmp
-#include <assert.h>
+#include "Stream.h"
+#include "FileAVHandler.h"
 using namespace upnp_live;
 
-Stream::Stream(const char* link) : ContentContainer(), url(link)
-{
-	//url = link;
-	stream_is_live = false;
-	baseResURI = "";
-	setParentID(0);
-}
-//Manually defined copy-constructor because atomic variables have their CCs deleted, thereby "infecting" any object that uses them as private vars
-Stream::Stream(const Stream& other) : ContentContainer(other), url(other.url), baseResURI(other.baseResURI), resolutions(other.resolutions), stream_is_live(other.stream_is_live.load()) {}
-Stream::~Stream() {}
 
-void Stream::setURL(const char* link)
+//{ Inits
+Stream::Stream(
+	std::string name,
+	std::string mt,
+	std::unique_ptr<AVSource>&& avh,
+	std::unique_ptr<StatusHandler>&& sh,
+	std::unique_ptr<Transcoder>&& tr) :
+Name{name},
+mimeType{mt},
+avHandler{std::move(avh)},
+statusHandler{std::move(sh)},
+transcoder{std::move(tr)}
 {
-	url = link;
-	if(resolutions.size() > 0)
+	logger = Logger::GetLogger();
+
+	if(avHandler == nullptr)
+		throw std::invalid_argument("No AV handler");
+	if(avHandler->SourceType == external && mimeType.empty())
+		throw std::invalid_argument("Mimetype required for external AV handler");
+	if(avHandler->SourceType == file && transcoder == nullptr)
+		throw std::invalid_argument("File AV handler requires transcoder");
+	if(strncasecmp(mimeType.c_str(), "video", 5) != 0 && strncasecmp(mimeType.c_str(), "audio", 5) != 0)
+		throw std::invalid_argument("Bad Mimetype");
+
+	try
 	{
-		stream_is_live = false;
-		resolutions.clear();
+		StartHeartbeat();
 	}
-}
-std::string Stream::getURL()
-{
-	return url;
-}
-
-void Stream::populateStreams()
-{
-	if(url.size() == 0)
-		return;
-
-	int pipefd[2];
-	if(pipe(pipefd) == -1)
+	catch(std::system_error& e)
 	{
-		std::cout << "Failed to create data pipe" << std::endl;
-		return;
+		std::string s {"Error creating heartbeat thread for "};
+		s += Name;
+		s += ": ";
+		s += e.what();
+		throw std::runtime_error(s);
 	}
-	pid_t pid = fork();
 
-	if(pid == -1)
+	if(statusHandler == nullptr)
 	{
-		std::cout << "Failed to create child process" << std::endl;
-		return;
+		logger->Log_cc(verbose, 3, "No status handler for ", Name.c_str(), "\n");
+		streamIsLive = true;
 	}
-	if(pid == 0) //Child
+	if(transcoder == nullptr)
+		logger->Log_cc(verbose, 3, "No transcoder for ", Name.c_str(), "\n");
+
+}
+int Stream::StartAVHandler()
+{
+	logger->Log_cc(info, 3, "Starting stream: ", Name.c_str(), "\n");
+	UpdateReadTime();
+	int fd = avHandler->Init();
+	if(transcoder != nullptr)
 	{
-		if(dup2(pipefd[1], STDOUT_FILENO) == -1)
+		try
 		{
-			std::cerr << "Error: Failed to link pipe to stdout\n";
-			exit(EXIT_FAILURE);
+			transcoder->SetSource(fd);
+			fd = transcoder->Init();
 		}
-		close(pipefd[0]);
-		if(util::FileExists("scripts/listStreams.py"))
-			execl("scripts/listStreams.py", "listStreams.py", url.c_str(), static_cast<char*>(0));
-		else
-			std::cerr << "Error: Script does not exist";
-		exit(EXIT_FAILURE); //Exit in case execl fails or the file doesn't exist
-	}
-	else //Parent
-	{
-		close(pipefd[1]); //close the write-only file descriptor
-		waitpid(pid, nullptr, 0);
-		std::string output;
-		char character, result;
-		result = read(pipefd[0], &character, 1);
-		while(result > 0)
+		catch(std::exception& e)
 		{
-			output += character;
-			result = read(pipefd[0], &character, 1);
+			avHandler->Shutdown();
+			throw e;
 		}
-		//pipefd[0] >> output;
-		if(strncasecmp(output.c_str(), "error", 5) == 0)
-		{
-			std::cerr << "Error getting quality levels for \"" << url << "\":\n" << output << std::endl;
-			stream_is_live = false;
-		}
-		else if(output.find(',') != std::string::npos)
-		{
-			this->addResolutions(upnp_live::util::SplitString(output, ','));
-			stream_is_live = true;
-		}
-		else
-		{
-			this->addResolution(output);
-			stream_is_live = true;
-		}
-		/*size_t com1 = 0, com2 = output.find(',');
-		if(com2 == std::string::npos)
-		{
-			std::cout << "Bad output getting stream resolutions" << endl;
-			return;
-		}
-		while(com2 != std::string::npos)
-		{
-			this->addResolution(output.substr((com1 == 0 ? 0 : com1+1), com2-com1-1));
-			com1 = com2;
-			com2 = output.find(',', com1+1);
-		}
-		this->addResolution(output.substr(com1+1)); //Add final list item
-		*/
 	}
+	
+
+	return fd;
 }
-
-std::string Stream::getMetadataXML()
+void Stream::StartHeartbeat()
 {
-	std::stringstream ss;
-	//FIXME - Replace childCount number with function call after heartbeat thread is implemented
-	ss << "<container id=\"" << getObjectID() << "\" parentID=\"" << getParentID() << "\" childCount=\"5\" restricted=\"1\" searchable=\"0\">\n" << \
-		"<dc:title>" << getURL() << "</dc:title>\n" << \
-		"<upnp:class>object.container.storageFolder</upnp:class>\n" << \
-	"</container>\n";
-	return ss.str();
+	heartbeatRunning = true;
+	heartbeatThread = std::thread(&Stream::Heartbeat, this);
 }
-std::string Stream::getChildrenXML(int requestedCount, unsigned int startingIndex, int& numReturned)
+//} Inits
+
+
+
+
+//{ Shutdowns
+Stream::~Stream()
 {
-
-	//TODO - After implementing the heartbeat thread, put a check here to see if the stream is live or not
-	//TODO - also get rid of this call to populateStreams()
-	if(resolutions.empty())
-		populateStreams();
-
-	std::stringstream xml;
-	if(startingIndex >= resolutions.size())
+	logger->Log_cc(info, 3, "Destroying stream: ", Name.c_str(), "\n");
+	try
 	{
-		numReturned = 0;
-		std::string s = "";
-		return s;
+		StopHeartbeat();
 	}
-	int remainingItems = requestedCount;
-	if(requestedCount == 0)
-		remainingItems = std::numeric_limits<int>::max();
-		
-	int count = 0;
-	std::string s;
-	while(count+startingIndex < resolutions.size() && remainingItems > 0)
+	catch(std::system_error& e)
 	{
-		/*xml << "<item id=\"" << getObjectID() << "-" << startingIndex+count+1 << "\" parentID=\"" << getObjectID() << "\" restricted=\"1\">\n" \
-		"<dc:title>" << *i << "</dc:title>\n" \
-		"<upnp:class>object.item.videoItem</upnp:class>\n" \
-		"<res id=\"" << getObjectID() << "-" << startingIndex+count+1 << "\" protocolInfo=\"http-get:*:video/MP2T:*\">" << url << "</res>\n" \
-		"</item>\n";*/
-		s = getChildXML(startingIndex+count);
-		if(strncasecmp(s.c_str(), "error", 5) == 0)
-			return s;
-		xml << s;
-		count++;
-		remainingItems--;
-	}
-	numReturned = count;
-	return xml.str();
-}
-
-std::string Stream::getChildXML(unsigned int index)
-{
-	if(resolutions.empty())
-		populateStreams();
-
-	std::stringstream xml;
-	if(index >= resolutions.size())
-	{
-		std::string s = "";
-		return s;
-	}
-	xml << "<item id=\"" << getObjectID() << "-" << index+1 << "\" parentID=\"" << getObjectID() << "\" restricted=\"1\">\n" \
-	"<dc:title>" << resolutions[index] << "</dc:title>\n" \
-	"<upnp:class>object.item.videoItem</upnp:class>\n" \
-	"<res id=\"" << getObjectID() << "-" << index+1 << "-stream\" protocolInfo=\"http-get:*:video/mpeg:*\">" << getResURI(index) << "</res>\n" \
-	"</item>\n";
-	return xml.str();
-}
-int Stream::getChildCount()
-{
-	if(resolutions.empty())
-		populateStreams();
-
-	return resolutions.size();
-}
-
-
-
-
-void Stream::addResolution(std::string res)
-{
-	resolutions.push_back(res);
-}
-void Stream::addResolutions(std::vector<std::string> res)
-{
-	std::vector<std::string>::iterator i = res.begin();
-	while(i != res.end())
-	{
-		resolutions.push_back(*i);
-		i++;
+		logger->Log_cc(error, 5, "Error stopping heartbeat for ", Name.c_str(), ": ", e.what(), "\n");
 	}
 }
-void Stream::removeResolution(std::string res)
+void Stream::StopAVHandler() try
 {
-	std::vector<std::string>::iterator i = resolutions.begin();
-	while(i != resolutions.end())
+	logger->Log_cc(info, 3, "Stopping stream: ", Name.c_str(), "\n");
+	if(transcoder != nullptr)
+		transcoder->Shutdown();
+	avHandler->Shutdown();
+}
+catch(std::exception& e)
+{
+	logger->Log_cc(error, 5, "Error stopping stream ", Name.c_str(), "\n", e.what(), "\n");
+}
+void Stream::StopHeartbeat()
+{
+	heartbeatRunning = false;
+	if(heartbeatThread.joinable())
+		heartbeatThread.join();
+}
+//} Shutdowns
+
+
+
+
+//Thread to periodically check stream status and shutdown
+//the av handler after data stops being read
+void Stream::Heartbeat()
+{
+	namespace chr = std::chrono;
+	
+	lastStatus = chr::steady_clock::now();
+	lastStatus -= chr::seconds(statusInterval.load()+1);
+	std::this_thread::sleep_for(chr::milliseconds(100));
+	while(heartbeatRunning.load())
 	{
-		if(*i == res)
+		auto now = chr::steady_clock::now();
+		auto delta = chr::duration_cast<chr::seconds>(now-lastStatus);
+		//status
+		if(statusHandler != nullptr && delta.count() >= chr::seconds(statusInterval.load()).count())
 		{
-			resolutions.erase(i);
-			break;
+			UpdateStatus();
+			lastStatus = chr::steady_clock::now();
 		}
-		i++;
+		//handler timeout
+		if(avHandler->IsInitialized() && handlerTimeout.load() > 0)
+		{
+			now = chr::steady_clock::now();
+			{
+				std::lock_guard<std::mutex> guard(readTimeMutex);
+				delta = chr::duration_cast<chr::seconds>(now-lastRead);
+			}
+			if(delta.count() >= chr::seconds(handlerTimeout.load()).count())
+			{
+				logger->Log_cc(info, 3, "[", Name.c_str(), "] timeout reached\n");
+				StopAVHandler();
+			}
+		}
+		std::this_thread::sleep_for(chr::milliseconds(100));
 	}
 }
-void Stream::clearResolutions()
+void Stream::UpdateStatus()
 {
-	resolutions.clear();
-}
+	logger->Log_cc(debug, 5, "[", Name.c_str(), "] Getting status for ", Name.c_str(), "\n");
+	bool live;
 
-
-
-
-void Stream::setBaseResURI(const char* newRes)
-{
-	baseResURI = newRes;
-}
-void Stream::setBaseResURI(std::string newRes)
-{
-	baseResURI = newRes;
-}
-std::string Stream::getResURI(int index)
-{
-	std::stringstream ss;
-	ss << baseResURI << getObjectID() << "/" << resolutions[index] << "/file.mts";
-	return ss.str();
-}
-
-
-
-
-bool Stream::isLive()
-{
-	/*if(!stream_is_live.test_and_set())
-	{
-		stream_is_live.clear();
-		return false;
-	}
+	auto one = std::chrono::steady_clock::now();
+	if(avHandler->IsInitialized())
+		live = true;
 	else
-	{
-		return true;
-	}*/
-	return stream_is_live.load();
+		live = statusHandler->GetStatus();
+	auto two = std::chrono::steady_clock::now();
+	std::stringstream ss;
+	ss << "[" << Name << "] status: " << (live ? "live" : "not live") << " | took " << std::chrono::duration_cast<std::chrono::milliseconds>(two-one).count() << "ms" << "\n";
+	logger->Log(verbose, ss.str());
+	streamIsLive = live;
 }
+
+
+
+
+//{ Simple accessors/mutators
+void Stream::SetStatusInterval(int intv)
+{
+	if(intv > 0)
+		statusInterval = intv;
+}
+int Stream::GetStatusInterval()
+{
+	return statusInterval.load();
+}
+std::string Stream::GetMimeType()
+{
+	if(!mimeType.empty())
+		return mimeType;
+	
+	if(transcoder != nullptr)
+		return transcoder->GetMimetype();
+	
+	return avHandler->GetMimetype();
+}
+bool Stream::IsLive()
+{
+	return streamIsLive.load();
+}
+bool Stream::HasTranscoder()
+{
+	return transcoder == nullptr;
+}
+std::string Stream::GetFilePath()
+{
+	if(avHandler->SourceType != file)
+		throw std::runtime_error("Not a file stream");
+	
+	auto fh = static_cast<FileAVHandler*>(avHandler.get());
+	return fh->FilePath;
+}
+void Stream::UpdateReadTime()
+{
+	logger->Log_cc(debig_chungus, 3, "[", Name.c_str(), "] Updating read time\n");
+	std::lock_guard<std::mutex> guard(readTimeMutex);
+	lastRead = std::chrono::steady_clock::now();
+}
+//} Simple accessors/mutators
+

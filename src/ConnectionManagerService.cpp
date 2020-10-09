@@ -1,29 +1,25 @@
 #include "ConnectionManagerService.h"
-#include "Exceptions.h"
 #include <iostream>
 #include <sstream>
 using namespace upnp_live;
 
 ConnectionManagerService::ConnectionManagerService()
 {
+	logger = Logger::GetLogger();
 }
 
-ConnectionManagerService::~ConnectionManagerService()
-{
-}
-
-void ConnectionManagerService::executeAction(UpnpActionRequest* request)
+void ConnectionManagerService::ExecuteAction(UpnpActionRequest* request)
 {
 	std::string ActionName = UpnpString_get_String(UpnpActionRequest_get_ActionName(request));
 	DOMString requestXML = ixmlDocumenttoString(UpnpActionRequest_get_ActionRequest(request));
 	if(requestXML == nullptr)
 	{
-		std::cerr << "[ConnectionManagerService] error converting action to string\n";
+		logger->Log_cc(error, 3, "[ConnectionManagerService] error converting action ", ActionName.c_str(), " to string\n");
 		return;
 	}
 	else
 	{
-		std::cout << "[ConnectionManagerService] recieved action: " << ActionName << "\n" << requestXML << std::endl;
+		logger->Log_cc(debug, 5, "[ConnectionManagerService] recieved action: ", ActionName.c_str(), "\n", requestXML, "\n");
 		ixmlFreeDOMString(requestXML);
 	}
 
@@ -47,7 +43,7 @@ void ConnectionManagerService::executeAction(UpnpActionRequest* request)
 	}
 	else
 	{
-		std::cout << "Unknown action request: " << ActionName << std::endl;
+		logger->Log_cc(error, 3, "Unknown action request: ", ActionName.c_str(), "\n");
 		UpnpActionRequest_set_ErrCode(request, 401);
 		UpnpString* errorString = UpnpString_new();
 		UpnpString_set_String(errorString, "Invalid Action");
@@ -68,12 +64,12 @@ void ConnectionManagerService::executeAction(UpnpActionRequest* request)
 
 	int ret = ixmlParseBufferEx(responseXML.c_str(), &response);
 	if(ret != IXML_SUCCESS)
-		std::cout << "[ConnectionManagerService] Error " << ret << " converting response XML into document\n" << responseXML << std::endl;
+		logger->Log_cc(error, 5, "[ConnectionManagerService] Error ", std::to_string(ret).c_str(), " converting response XML into document\n", responseXML.c_str(), "\n");
 	else
 	{
 		UpnpActionRequest_set_ActionResult(request, response);
 		DOMString finishedXML = ixmlDocumenttoString(response);
-		std::cout << "Finished response:\n" << finishedXML << std::endl;
+		logger->Log_cc(debug, 3, "Finished response:\n", finishedXML, "\n");
 		ixmlFreeDOMString(finishedXML);
 	}
 }
@@ -92,12 +88,18 @@ std::string ConnectionManagerService::getProtocolInfo()
 			"http-get:*:video/MP2T:*" \
 		"</Source>"*/ \
 		"<Source>" \
-			"http-get:*:image/gif:*," \
-			"http-get:*:image/jpeg:*," \
-			"http-get:*:image/png:*," \
-			"http-get:*:image/x-ms-bmp:*," \
+			"http-get:*:audio/ogg:*," \
+			"http-get:*:audio/mpeg:*," \
+			"http-get:*:audio/flac:*," \
+			"http-get:*:audio/aac:*," \
+			"http-get:*:audio/opus:*," \
+			"http-get:*:audio/wav:*," \
+			"http-get:*:audio/webm:*," \
+			"http-get:*:video/x-matroska:*," \
 			"http-get:*:video/mp4:*," \
-			/*"http-get:*:video/mpeg:*,"*/ \
+			"http-get:*:video/webm:*," \
+			"http-get:*:video/x-msvideo:*," \
+			"http-get:*:video/ogg:*," \
 			"http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_PS_PAL;DLNA.ORG_OP=11;DLNA.ORG_FLAGS=81500000000000000000000000000000," \
 			"http-get:*:video/mpg:*," \
 			"http-get:*:video/MP2T:*," \
