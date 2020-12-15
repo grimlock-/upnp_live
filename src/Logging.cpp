@@ -18,7 +18,15 @@ void Logger::SetLogLevel(log_level lv)
 {
 	currentLevel = lv;
 }
+log_level Logger::GetLogLevel()
+{
+	return currentLevel;
+}
 
+void Logger::Log(std::string& message)
+{
+	Log(always, message.c_str());
+}
 void Logger::Log(log_level lv, std::string& message)
 {
 	Log(lv, message.c_str());

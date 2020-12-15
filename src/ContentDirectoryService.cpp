@@ -39,6 +39,9 @@ void ContentDirectoryService::RemoveStream(std::string name)
 }
 bool ContentDirectoryService::AddFile(std::string name, std::string mimetype, std::string path)
 {
+	if(files.find(name) != files.end())
+		throw std::runtime_error("File with given id already exists");
+
 	CDResource newItem;
 	newItem.name = name;
 	newItem.mime_type = mimetype;
@@ -64,7 +67,7 @@ void ContentDirectoryService::RemoveFile(std::string name)
 
 void ContentDirectoryService::Heartbeat()
 {
-	std::this_thread::sleep_for(std::chrono::seconds(5));
+	std::this_thread::sleep_for(std::chrono::seconds(3));
 	while(heartbeatRunning.load())
 	{
 		{
@@ -99,8 +102,7 @@ void ContentDirectoryService::Heartbeat()
 				}
 			}
 		}
-		//FIXME - Do a smaller wait time here with a duration calculation like the stream heartbeat to respond faster to a shutdown signal
-		std::this_thread::sleep_for(std::chrono::seconds(5));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 }
 

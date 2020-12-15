@@ -18,6 +18,11 @@ struct FileOptions
 	std::string name, mime_type, path;
 };
 
+struct DirectoryOptions
+{
+	std::string path;
+};
+
 struct InitOptions 
 {
 	std::string web_root = "www";
@@ -28,6 +33,7 @@ struct InitOptions
 	std::string address, interface;
 	std::vector<StreamInitOptions> streams;
 	std::vector<FileOptions> files;
+	std::vector<DirectoryOptions> directories;
 	int port = 0;
 	int log_level = 4;
 	bool daemon = false;

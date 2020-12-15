@@ -33,6 +33,8 @@ class Server
 		void AddStreams(std::vector<StreamInitOptions>& streams);
 		void AddFile(FileOptions& options);
 		void AddFiles(std::vector<FileOptions>& files);
+		void RemoveFile(std::string filename);
+		void RemoveFiles(std::vector<std::string>& files);
 		int IncomingEvent(Upnp_EventType eventType, const void* event, void* cookie);
 
 		int GetPort();
@@ -63,7 +65,7 @@ class Server
 		std::multimap<std::string, VirtualFileHandle> handles;
 		std::mutex handleMutex;
 		int broadcastExpiration {0}; //0 makes lib default to 30 second advertisements
-		std::string webRoot;
+		const std::string webRoot;
 		UpnpDevice_Handle libHandle;
 		IXML_Document* description;
 		std::unique_ptr<ContentDirectoryService> cds;

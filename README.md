@@ -33,7 +33,7 @@ I make no guarantees of any kind with this project. I don't expect to respond to
 
 ## Known Bugs
 * The program can be a bit brittle. It tends to segfault when frequently recompiling (hopefully that's just me being bad with makefiles) and may still do it when shutting down thanks to Server::Read().
-* The file AV handler is probably busted, I haven't really tested it since, even if it technically works, it won't really work as long as MemoryStore overwrites old data as soon as it can. 
+* The file AV handler is probably busted, I haven't actually tested it since, even if it technically works, it won't really work as long as MemoryStore overwrites old data as soon as it can. 
 * Will occasionally hang if shutting down while transcoding
 
 ## Code Structure

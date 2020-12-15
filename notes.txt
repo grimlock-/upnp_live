@@ -1,3 +1,6 @@
+================
+= Buffer sizes =
+================
 Gerbera/MT defaults
 audio buffer size: 1MB/1,048,576
 audio chunk size: 131KB/131,072
@@ -21,3 +24,32 @@ Copying 1 second (1.32 seconds technically) gives ~12000 kb/s (so 12 mb/s aka ~1
 That 1 second file's size is just barely under 2MB, which seems to match up with the numbers above
 as such, a 30s buffer for a sp00ky stream = ~31MB, meaning gerbera/MT has around a 15 second buffer for transcoding
 for audio, 1MB will hold a bit over a minute of 128kb CBR lossy audio and between 7 and 16 seconds of flac (bitrates from 1200kbps to 500kbps)
+
+
+===============
+= dir monitor =
+===============
+My ultimate conclusion is to have the dir_delete event created by IN_DELETE and IN_MOVED_FROM messages but
+to only remove the watch ID from the hash table with the DELETE/MOVE_SELF messages. The end result is that
+queueing the DM event in the vector and removing the watch path from the hash table get done in different
+orders depending on event. This may lead to problems later on, so try and come up with a better design
+
+delete directory:
+  DELETE_SELF
+  IGNORED
+  DELETE in housing dir
+
+create & delete directory (scripted):
+  CREATE, but making watch fails
+  DELETE in housing dir
+
+rename directory:
+  MOVED_FROM (old filename)
+  MOVED_TO (new filename)
+  MOVE_SELF
+
+move directory outside of any watched ones:
+  MOVED_FROM
+  MOVE_SELF
+  create file in moved directory:
+    CREATE (path via watch ID is INVALID)

@@ -20,37 +20,31 @@
 #include "Exceptions.h"
 using namespace upnp_live;
 
-Server::Server(struct InitOptions& options)
+Server::Server(struct InitOptions& options) : webRoot(options.web_root)
 {
 	logger = Logger::GetLogger();
 
-	loadXml(options);
-	cds = std::make_unique<ContentDirectoryService>(options.friendly_name);
-	cms = std::make_unique<ConnectionManagerService>();
-
-	//Initialize AVStore
-	avStore = std::unique_ptr<AVStore>(new MemoryStore());
-	
 	//Web server stuff
-	if(options.web_root == "")
-	{
-		webRoot = "www";
-	}
-	else
-	{
-		webRoot = options.web_root;
-		while(webRoot.back() == '/')
-			webRoot.pop_back();
-	}
+	if(webRoot.empty())
+		throw std::invalid_argument("Web root cannot be empty");
+	if(webRoot.back() == '/' || webRoot.back() == '\\')
+		throw std::invalid_argument("Web root cannot end with a slash");
 	if(UpnpSetWebServerRootDir(webRoot.c_str()) != UPNP_E_SUCCESS)
 		throw std::runtime_error("Error setting web server root directory");
 	
 	if(UpnpAddVirtualDir("/res", reinterpret_cast<const void*>(&RES), nullptr) != UPNP_E_SUCCESS)
 		throw std::runtime_error("Error setting up resources virtual directory");
-	
+
 	//TODO - add API stuff here
 
-	//Register device and callbacks
+	loadXml(options);
+
+	//Initialize components
+	cds = std::make_unique<ContentDirectoryService>(options.friendly_name);
+	cms = std::make_unique<ConnectionManagerService>();
+	avStore = std::unique_ptr<AVStore>(new MemoryStore());
+
+	//Register device
 	DOMString descStr = ixmlDocumenttoString(description);
 	int result = UpnpRegisterRootDevice2(UPNPREG_BUF_DESC, descStr, strlen(descStr), 1, options.event_callback, nullptr, &libHandle);
 	ixmlFreeDOMString(descStr);
@@ -337,18 +331,19 @@ void Server::AddFile(FileOptions& options)
 	if(options.path[0] == '/')
 		throw std::invalid_argument("Must be relative path");
 
-	if(!util::FileExists(options.path.c_str()))
+	//TODO - Add a check here to not include text files and the like
+
+	std::string relPath = webRoot + "/" + options.path;
+	if(!util::FileExists(relPath.c_str()))
 		throw std::invalid_argument("File does not exist");
 
 	if(options.mime_type.empty())
 	{
-		if(options.path.find(".") == std::string::npos)
+		if(options.path.find(".") == std::string::npos || options.path.find_last_of(".") == options.path.size()-1)
 			throw std::invalid_argument("File must have an extension");
 
 		auto i = options.path.find_last_of('.');
 		auto ext = options.path.substr(i+1);
-		if(ext.empty())
-			throw std::invalid_argument("No extension found");
 		options.mime_type = util::GetMimeType(ext.c_str());
 	}
 
@@ -362,10 +357,30 @@ void Server::AddFiles(std::vector<FileOptions>& files)
 		try
 		{
 			AddFile(file);
+			logger->Log_cc(info, 3, "Added ", file.path.c_str(), " to content directory\n");
 		}
 		catch(std::exception& e)
 		{
 			logger->Log_cc(error, 5, "Error adding file ", file.name.c_str(), "\n", e.what(), "\n");
+		}
+	}
+}
+void Server::RemoveFile(std::string filepath)
+{
+	cds->RemoveFile(filepath);
+}
+void Server::RemoveFiles(std::vector<std::string>& files)
+{
+	for(auto& file : files)
+	{
+		try
+		{
+			RemoveFile(file);
+			logger->Log_cc(info, 3, "Removed ", file.c_str(), " from content directory\n");
+		}
+		catch(std::exception& e)
+		{
+			logger->Log_cc(error, 5, "Error removing file ", file.c_str(), "\n", e.what(), "\n");
 		}
 	}
 }

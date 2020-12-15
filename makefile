@@ -2,7 +2,7 @@ CFLAGS = -Wall -std=c++14 -pthread -Iinclude -D_FILE_OFFSET_BITS=64
 LARGS = -pthread
 LIBS = -lupnp -lixml -lpthread
 CC = g++
-OBJECTS = ChildProcess.o Config.o ConnectionManagerService.o ContentDirectoryService.o ExternalAVHandler.o ExternalStatusHandler.o FileAVHandler.o Logging.o main.o MemoryStore.o Server.o Stream.o Transcoder.o util.o
+OBJECTS = ChildProcess.o Config.o ConnectionManagerService.o ContentDirectoryService.o DirectoryMonitor.o ExternalAVHandler.o ExternalStatusHandler.o FileAVHandler.o Logging.o main.o MemoryStore.o Server.o Stream.o Transcoder.o util.o
 
 build_bin: CFLAGS += -O3
 build_bin: build_objs upnp_live
@@ -23,6 +23,9 @@ ConnectionManagerService.o : src/ConnectionManagerService.cpp include/Connection
 
 ContentDirectoryService.o : src/ContentDirectoryService.cpp include/ContentDirectoryService.h
 	$(CC) -c $(CFLAGS) src/ContentDirectoryService.cpp -o ContentDirectoryService.o
+
+DirectoryMonitor.o : src/DirectoryMonitor.cpp include/DirectoryMonitor.h
+	$(CC) -c $(CFLAGS) src/DirectoryMonitor.cpp -o DirectoryMonitor.o
 	
 ExternalAVHandler.o : src/ExternalAVHandler.cpp include/ExternalAVHandler.h
 	$(CC) -c $(CFLAGS) src/ExternalAVHandler.cpp -o ExternalAVHandler.o

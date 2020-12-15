@@ -1,3 +1,9 @@
+Current
+Added ability to monitor directories inside web root for new or deleted files
+Added config option
+  *File option
+    *directory
+
 v0.2
 Added handlers to compartmentalize grabbing AV data
 Restructure to not depend on StreamLink specifically

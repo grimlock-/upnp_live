@@ -16,6 +16,8 @@ class Logger
 		static Logger* GetLogger();
 		static void SetLogger(Logger* l);
 		void SetLogLevel(log_level lv);
+		log_level GetLogLevel();
+		void Log(std::string& message);
 		void Log(log_level lv, std::string& message);
 		void Log(log_level lv, std::string&& message);
 		void Log(log_level lv, const char* message);

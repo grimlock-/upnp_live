@@ -98,6 +98,8 @@ void upnp_live::ParseArgument(std::string name, std::string value, InitOptions& 
 		std::cout << "web root\n";
 #endif
 		options.web_root = value;
+		while(options.web_root.back() == '/' || options.web_root.back() == '\\')
+			options.web_root.pop_back();
 	}
 	else if(name == "stream" || name == "name")
 	{
@@ -185,19 +187,33 @@ void upnp_live::ParseArgument(std::string name, std::string value, InitOptions& 
 
 		options.files.back().path = value;
 	}
+	else if(name == "directory" || name == "dir")
+	{
+#ifdef UPNP_LIVE_DEBUG
+		std::cout << "directory\n";
+#endif
+		if(value.front() == '/' || value.front() == '\\')
+		{
+			std::cout << "Directory config option cannot be an absolute path: " << value << "\n";
+			return;
+		}
+		while(value.back() == '/' || value.back() == '\\')
+			value.pop_back();
+		options.directories.emplace(options.directories.end());
+		options.directories.back().path = value;
+	}
 }
 
 void upnp_live::ParseArguments(int argc, char* argv[], InitOptions& options)
 {
 #ifdef UPNP_LIVE_DEBUG
-		std::cout << "\n";
 	std::cout << "ParseArguments()\n";
 #endif
 	for(int i = 1; i < argc; i++)
 	{
 		std::string arg = argv[i];
 #ifdef UPNP_LIVE_DEBUG
-		std::cout << "Command line arg: " << arg << std::endl;
+		std::cout << "Command line arg: " << arg << "\n";
 #endif
 		
 		if(arg == "-c" || arg == "--config")
@@ -276,15 +292,13 @@ void upnp_live::ParseConfigFile(InitOptions& options)
 			std::string line;
 			std::string::size_type c;
 			std::getline(configFile, line);
-			while(std::isspace(line.front()))
-				line.erase(0, 1);
-			while(std::isspace(line.back()))
-				line.pop_back();
+			line = util::TrimString(line);
 			if(line.empty() || line.front() == '#')
 				continue;
 			c = line.find_first_of(" ");
-			std::string name = line.substr(0, c);
-			std::string value = line.substr(c+1);
+			//TODO - to lowercase
+			std::string name = util::TrimString(line.substr(0, c));
+			std::string value = util::TrimString(line.substr(c+1));
 			ParseArgument(name, value, options);
 		}
 		if(!tStream.name.empty())
@@ -292,7 +306,7 @@ void upnp_live::ParseConfigFile(InitOptions& options)
 	}
 	catch(std::exception& e)
 	{
-		std::cerr << "Caught exception parsing config file: " << e.what() << std::endl;
+		std::cerr << "Caught exception parsing config file: " << e.what() << "\n";
 		return;
 	}
 }
