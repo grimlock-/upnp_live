@@ -3,6 +3,7 @@ upnp_live.conf
 *.log
 *.o
 *.swp
+www/files
 
 # Dont't ignore these file
 !.gitignore
