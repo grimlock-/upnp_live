@@ -1,8 +1,10 @@
-Current
+v0.3.dev
 Added ability to monitor directories inside web root for new or deleted files
 Added config option
   *File option
     *directory
+Added Status handler:
+  *http
 
 v0.2
 Added handlers to compartmentalize grabbing AV data

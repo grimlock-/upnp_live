@@ -6,10 +6,10 @@
 
 namespace upnp_live {
 
-enum AVSourceType { external, file, transcoder };
+enum AVSourceType { external, file, transcoder, http };
 
 /*
- * Interface for any class that has an AV buffer other classes can read
+ * Interface for any class that initializes a file descriptor other classes can read AV data from
  */
 class AVSource
 {

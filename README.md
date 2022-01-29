@@ -1,11 +1,10 @@
 upnp_live
 =============
-A UPnP Media Server for mirroring internet live streams. Also has basic file serving functionality.
+A UPnP Media Server for relaying internet live streams. Also has basic file serving functionality.
 
 ## Dependencies
 * [libupnp](https://github.com/pupnp/pupnp) v1.8+
   * Only tested with versions 1.8.3 and 1.12.1
-  * Use ``make old_upnp`` to build for v1.8
 * A program that prints AV data to stdout. Not neded for compilation, but required for core functionality until other handlers are implemented.
   * Output from this program should either originate from a real-time source or be throttled so as to be no faster than real-time. The primary use case is programs like [streamlink](https://github.com/streamlink/streamlink) that retrieve remote live streams.
 * \[optional\] Transcoding requires a program like [ffmpeg](https://ffmpeg.org/) or [flac](https://xiph.org/flac/documentation_tools_flac.html) that can read media from stdin and print it to stdout.
@@ -34,15 +33,10 @@ I make no guarantees of any kind with this project. I don't expect to respond to
 ## Known Bugs
 * The program can be a bit brittle. It tends to segfault when frequently recompiling (hopefully that's just me being bad with makefiles) and may still do it when shutting down thanks to Server::Read().
 * The file AV handler is probably busted, I haven't actually tested it since, even if it technically works, it won't really work as long as MemoryStore overwrites old data as soon as it can. 
-* Will occasionally hang if shutting down while transcoding
+* Will frequently hang while shutting down
 
 ## Code Structure
 The three classes that form the largest chunks of functionality are Server, Stream and MemoryStore. Basically everything else is directly dependent on one of these three classes and they house most of the code that determines control flow in the program, does error handling, etc.
-#### style
-* struct member names are all lowercase and use underscores to separate words
-* ThisCasing for public class members
-* thisCasing for protected/private class members
-* braces start and end on their own lines
 
 ## TODO (big ticket items only. see TODO.md for more)
 * Use autoconf or something instead of a manually edited makefile for compilation

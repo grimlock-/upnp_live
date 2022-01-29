@@ -59,7 +59,8 @@ class Stream
 		std::unique_ptr<Transcoder> transcoder;
 		std::thread heartbeatThread;
 		std::atomic<bool> heartbeatRunning {false};
-		std::atomic<int> statusInterval {300}; //in seconds
+		//std::atomic<int> statusInterval {300}; //in seconds
+		std::atomic<int> statusInterval {30}; //in seconds
 		//AV Handler is shutdown after the avstore stops reading data
 		std::atomic<int> handlerTimeout {10}; //in seconds 0=no timeout
 		std::chrono::time_point<std::chrono::steady_clock> lastRead;

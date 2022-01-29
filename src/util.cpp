@@ -4,36 +4,67 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <upnp/upnp.h>
 #include "util.h"
 using namespace upnp_live;
 
 /*
  * Splits the input string into a vector of smaller strings using the provided character delimiter
  * If the input is less than 3 characters or the delimiter isn't found, the input string is the vector's only element
-**/
+ */
 std::vector<std::string> util::SplitString(std::string str, char delimiter)
 {
-	TrimString(str, delimiter);
+	std::string str2{ TrimString(str, delimiter) };
 
 	std::vector<std::string> v;
-	size_t pos1 = 0, pos2 = str.find(delimiter);
+	size_t pos1 = 0, pos2 = str2.find(delimiter);
 
-	if(str.length() < 3 || pos2 == std::string::npos)
+	if(str2.size() == 0 || pos2 == std::string::npos)
 	{
 		v.push_back(str);
 		return v;
-	}
-	//If str starts with the delimiter, skip past it
-	while(pos1 == pos2)
-	{
-		pos1++;
-		pos2 = str.find(delimiter, pos1);
 	}
 
 	while(pos2 != std::string::npos)
 	{
 		if(pos1 != pos2)
 			v.push_back(str.substr(pos1, pos2-pos1));
+		pos1 = pos2+1;
+		pos2 = str.find(delimiter, pos1);
+	}
+	//If they are equal it means the last char is the delimiter
+	if(pos1 != pos2)
+		v.push_back(str.substr(pos1));
+	return v;
+}
+/*
+ * Splits a string while accounting for quotes to group stuff together
+ */
+std::vector<std::string> util::SplitArgString(std::string str, char delimiter)
+{
+	if(str.empty())
+		throw std::runtime_error("SplitArgString() with empty string");
+	str = TrimString(str, delimiter);
+
+	std::vector<std::string> v;
+	size_t pos1 = 0, pos2 = str.find(delimiter);
+
+	if(str.size() <= 2 || pos2 == std::string::npos)
+	{
+		v.push_back(str);
+		return v;
+	}
+
+	while(pos2 != std::string::npos)
+	{
+		if(pos1 != pos2)
+		{
+			if(str[pos1] == '\'')
+				pos2 = str.find('\'', pos1+1);
+			else if(str[pos1] == '"')
+				pos2 = str.find('"', pos1+1);
+			v.push_back(str.substr(pos1, pos2-pos1));
+		}
 		pos1 = pos2+1;
 		pos2 = str.find(delimiter, pos1);
 	}
@@ -50,9 +81,17 @@ std::string util::TrimString(std::string input)
 	if(input.empty())
 		return input;
 	while(std::isspace(input.front()))
+	{
 		input.erase(0, 1);
+		if(input.empty())
+			return input;
+	}
 	while(std::isspace(input.back()))
+	{
 		input.pop_back();
+		if(input.empty())
+			return input;
+	}
 	return input;
 }
 /*
@@ -63,9 +102,17 @@ std::string util::TrimString(std::string input, char c)
 	if(input.empty())
 		return input;
 	while(input.front() == c)
+	{
 		input.erase(0, 1);
+		if(input.empty())
+			return input;
+	}
 	while(input.back() == c)
+	{
 		input.pop_back();
+		if(input.empty())
+			return input;
+	}
 	return input;
 }
 /*
@@ -161,6 +208,8 @@ std::string util::GetMimeType(const char* ext)
 		return std::string("video/x-msvideo");
 	else if(strncasecmp(ext, "mpeg", 4) == 0)
 		return std::string("video/mpeg");
+	else if(strncasecmp(ext, "mpg", 3) == 0)
+		return std::string("video/mpeg");
 	else if(strncasecmp(ext, "ogv", 3) == 0)
 		return std::string("video/ogg");
 	else if(strncasecmp(ext, "ts", 2) == 0)
@@ -236,3 +285,4 @@ std::pair<std::vector<std::string>, std::vector<std::string>> util::GetDirectory
 
 	return std::make_pair(ret_files, ret_dirs);
 }
+

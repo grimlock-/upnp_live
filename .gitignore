@@ -1,5 +1,6 @@
 upnp_live
 upnp_live.conf
+test
 *.log
 *.o
 *.swp

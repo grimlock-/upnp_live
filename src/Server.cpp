@@ -11,9 +11,11 @@
 #include <fcntl.h>
 #include "Server.h"
 #include "MemoryStore.h"
+#include "ExternalStatusHandler.h"
 #include "ExternalAVHandler.h"
 #include "FileAVHandler.h"
-#include "ExternalStatusHandler.h"
+#include "HttpStatusHandler.h"
+#include "HttpAVHandler.h"
 #include "Transcoder.h"
 #include "util.h"
 #include "Version.h"
@@ -295,6 +297,12 @@ std::unique_ptr<AVSource> Server::createAVHandler(std::string& handlerType, std:
 		logger->Log(debug, "Creating file AV handler\n");
 		ret = std::unique_ptr<AVSource>(new FileAVHandler(argstr));
 	}
+	else if(strncasecmp(handlerType.c_str(), "http", 4) == 0)
+	{
+		logger->Log(debug, "Creating http AV handler\n");
+		throw std::runtime_error("http AV handler not implemented");
+		//ret = std::unique_ptr<AVSource>(new HttpAVHandler());
+	}
 	else
 	{
 		std::string err("Invalid AVHandler type: ");
@@ -316,6 +324,12 @@ std::unique_ptr<StatusHandler> Server::createStatusHandler(std::string& handlerT
 		logger->Log(debug, "Creating external status handler\n");
 		std::vector<std::string> v {std::move(util::SplitString(argstr, ' '))};
 		ret = std::unique_ptr<StatusHandler>(new ExternalStatusHandler(v));
+	}
+	else if(strncasecmp(handlerType.c_str(), "http", 4) == 0)
+	{
+		logger->Log(debug, "Creating http status handler\n");
+		struct HttpStatusOptions options{argstr};
+		ret = std::unique_ptr<StatusHandler>(new HttpStatusHandler(options));
 	}
 	else
 	{

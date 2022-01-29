@@ -20,18 +20,18 @@ void upnp_live::PrintHelp()
 \
         "  -c, --config <filepath>   configuration file to load\n" \
         "  -d, --daemon              run as a background process\n" \
-	"  -i, --interface <name>    set network interface (has priority over IP)\n" \
+	"  -i, --interface <name>    set network interface (has priority over -ip)\n" \
 	"  -ip, --address <ip>       set IP address\n" \
 	"  -p, --port <port>         set port\n" \
 	"  --loglevel <level>        accepts 0 (disable) to 7 (verbose debug)\n" \
 	"                            defaults to 4 (info)\n" \
 	"  -w, --web-root <path>     set root directory for web server\n" \
-	"                            defaults to 'www' relative to the executable\n";
+	"                            defaults to 'www' alongside the executable\n";
 }
 
 void upnp_live::PrintVersion()
 {
-	std::cout << "upnp_live v" << upnp_live_version << "\n";
+	std::cout << "upnp_live v" << upnp_live_version << " pupnp v" << UPNP_VERSION_STRING << "\n";
 }
 
 void upnp_live::ParseArgument(std::string name, std::string value, InitOptions& options)

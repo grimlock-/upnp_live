@@ -40,7 +40,7 @@ void shutdown(int signal)
 
 
 
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 int getInfoCallback(const char* filename, UpnpFileInfo* info, const void* cookie) try
 #else
 int getInfoCallback(const char* filename, UpnpFileInfo* info, const void* cookie, const void** request_cookie) try
@@ -53,7 +53,7 @@ catch(std::exception& e)
 	logger->Log_cc(error, 5, "Error getting virtual file info: ", filename, "\n", e.what(), "\n");
 	return -1;
 }
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 UpnpWebFileHandle openCallback(const char* filename, enum UpnpOpenFileMode mode, const void* cookie) try
 #else
 UpnpWebFileHandle openCallback(const char* filename, enum UpnpOpenFileMode mode, const void* cookie, const void* request_cookie) try
@@ -66,7 +66,7 @@ catch(std::exception& e)
 	logger->Log_cc(error, 5, "Error opening virtual file: ", filename, "\n", e.what(), "\n");
 	return nullptr;
 }
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 int closeCallback(UpnpWebFileHandle fh, const void* cookie) try
 #else
 int closeCallback(UpnpWebFileHandle fh, const void* cookie, const void* request_cookie) try
@@ -79,7 +79,7 @@ catch(std::exception& e)
 	logger->Log_cc(error, 3, "Error closing virtual file: ", e.what(), "\n");
 	return -1;
 }
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 int readCallback(UpnpWebFileHandle handle, char* buf, std::size_t len, const void* cookie) try
 #else
 int readCallback(UpnpWebFileHandle handle, char* buf, std::size_t len, const void* cookie, const void* request_cookie) try
@@ -92,7 +92,7 @@ catch(std::exception& e)
 	logger->Log_cc(error, 3, "Error reading virtual file: ", e.what(), "\n");
 	return 0;
 }
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie) try
 #else
 int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie, const void* request_cookie) try
@@ -105,7 +105,7 @@ catch(std::exception& e)
 	logger->Log_cc(error, 3, "Error seeking virtual file: ", e.what(), "\n");
 	return -1;
 }
-#ifdef OLD_UPNP
+#if UPNP_VERSION_MINOR <= 8
 int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie) try
 #else
 int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie, const void* request_cookie) try

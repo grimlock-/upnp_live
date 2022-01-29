@@ -71,7 +71,6 @@ int Stream::StartAVHandler()
 			throw e;
 		}
 	}
-	
 
 	return fd;
 }

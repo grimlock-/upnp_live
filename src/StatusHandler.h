@@ -1,4 +1,5 @@
-#pragma once
+#ifndef STATUSHANDLER_H
+#define STATUSHANDLER_H
 namespace upnp_live {
 
 /*
@@ -11,3 +12,4 @@ class StatusHandler
 };
 
 }
+#endif /* STATUSHANDLER_H */
