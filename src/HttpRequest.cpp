@@ -8,6 +8,7 @@
 #include <iostream>
 #include <exception>
 #include <stdexcept>
+#include <regex>
 #include <upnp/upnptools.h>
 #include "HttpRequest.h"
 #include "Version.h"
@@ -209,31 +210,17 @@ std::string HttpRequest::GetRedirectLocation()
 	if(responseBody.size())
 	{
 		size_t pos;
-		//FIXME - redo if a regex lib is ever added
-		pos = responseBody.find("http-equiv=\"REFRESH\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv=\"Refresh\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='REFRESH'");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='Refresh'");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv=\"LOCATION\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv=\"Location\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='LOCATION'");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='Location'");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv=\"CONTENT-LOCATION\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv=\"Content-Location\"");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='CONTENT-LOCATION'");
-		if(pos == std::string::npos)
-			pos = responseBody.find("http-equiv='Content-Location'");
-		if(pos == std::string::npos)
+		std::regex reg("http-equiv\\s*=\\s*['\"]refresh['\"]", std::regex::icase);
+		std::regex reg2("http-equiv\\s*=\\s*['\"]location['\"]", std::regex::icase);
+		std::regex reg3("http-equiv\\s*=\\s*['\"]content-location['\"]", std::regex::icase);
+		std::smatch m;
+		if(std::regex_search(responseBody, m, reg))
+			pos = m.position();
+		else if(std::regex_search(responseBody, m, reg2))
+			pos = m.position();
+		else if(std::regex_search(responseBody, m, reg3))
+			pos = m.position();
+		else
 			return ret;
 
 		size_t pos2 = responseBody.find("url=", pos);

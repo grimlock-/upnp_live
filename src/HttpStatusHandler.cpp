@@ -76,7 +76,6 @@ bool HttpStatusHandler::GetStatus()
 		}
 
 		bool red = req.IsResponseRedirect();
-		std::cout << "Redirect? " << std::boolalpha << red << "\n";
 		if(red)
 		{
 			std::cout << "Got redirect to " << req.GetRedirectLocation() << "\n";
