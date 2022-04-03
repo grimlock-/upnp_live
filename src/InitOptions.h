@@ -36,7 +36,7 @@ struct InitOptions
 	std::vector<DirectoryOptions> directories;
 	int port = 0;
 	int log_level = 4;
-	bool daemon = false;
+	bool background = false;
 	Upnp_FunPtr event_callback;
 };
 

@@ -9,7 +9,7 @@
 #include <utility>
 #include <upnp/upnp.h>
 #include "InitOptions.h"
-#include "AVSource.h"
+#include "AVHandler.h"
 #include "AVStore.h"
 #include "ContentDirectoryService.h"
 #include "ConnectionManagerService.h"
@@ -20,7 +20,6 @@
 namespace upnp_live {
 
 enum vdirs { api, resources };
-enum vfilehandletype { avstore, fd };
 
 class Server
 {
@@ -35,27 +34,26 @@ class Server
 		void AddFiles(std::vector<FileOptions>& files);
 		void RemoveFile(std::string filename);
 		void RemoveFiles(std::vector<std::string>& files);
-		int IncomingEvent(Upnp_EventType eventType, const void* event, void* cookie);
+		int IncomingEvent(Upnp_EventType eventType, const void* event);
 
 		int GetPort();
 		std::string GetAddress();
 		std::string GetBaseResURI();
 		std::string GetFriendlyName();
 
-		int GetInfo(const char* filename, UpnpFileInfo* info, const void* cookie);
-		UpnpWebFileHandle Open(const char* filename, enum UpnpOpenFileMode mode, const void* cookie);
-		int Close(UpnpWebFileHandle hnd, const void* cookie);
-		int Read(UpnpWebFileHandle hnd, char* buf, size_t len, const void* cookie);
-		int Seek(UpnpWebFileHandle hnd, long offset, int origin, const void* cookie);
-		int Write(UpnpWebFileHandle hnd, char* buf, size_t len, const void* cookie);
-		//static int CallbackWrapper(Upnp_EventType, const void*, void*);
+		//UpnpWebFileHandle = void* typedef. It's a handle for our end to use, not the lib
+		int GetInfo(const char* filename, UpnpFileInfo* info);
+		UpnpWebFileHandle Open(const char* filename, enum UpnpOpenFileMode mode);
+		int Close(UpnpWebFileHandle hnd);
+		int Read(UpnpWebFileHandle hnd, char* buf, size_t len);
+		int Seek(UpnpWebFileHandle hnd, long offset, int origin);
+		int Write(UpnpWebFileHandle hnd, char* buf, size_t len);
 	
 	protected:
 		struct VirtualFileHandle
 		{
-			vfilehandletype type;
 			std::string stream_name;
-			int fd {0};
+			//Opaque identifier used by AV Store
 			UpnpWebFileHandle data {0};
 		};
 	
@@ -78,16 +76,15 @@ class Server
 		
 		//Functions
 		void loadXml(InitOptions&);
-		//UpnpWebFileHandle = void* typedef. It's a handle for our end to use, not the lib
 		void execActionRequest(UpnpActionRequest*);
 		void execStateVarRequest(UpnpStateVarRequest*);
 		void execSubscriptionRequest(UpnpSubscriptionRequest*);
 		
 		int createPlainFileHandle(Stream& stream);
-		std::unique_ptr<AVSource> createAVHandler(std::string& handlerType, std::string& argstr);
+		std::unique_ptr<AVHandler> createAVHandler(std::string& handlerType, std::string& argstr);
 		std::unique_ptr<StatusHandler> createStatusHandler(std::string& handlerType, std::string& argstr);
 };
 
 }
 
-#endif /* SERVER_H */
+#endif

@@ -20,4 +20,4 @@ class ExternalStatusHandler : public StatusHandler, ChildProcess
 
 }
 
-#endif /* EXTERNALSTATUSHANDLER_H */
+#endif

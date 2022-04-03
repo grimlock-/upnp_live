@@ -7,7 +7,6 @@ HttpPersistentRequest::HttpPersistentRequest(std::string method, std::string Url
 {
 	std::string s{"User-Agent: upnp_live/"};
 	s += upnp_live_version;
-	s += "\r\n";
 	headers.push_back(s);
 }
 

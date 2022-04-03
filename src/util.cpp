@@ -4,7 +4,6 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <upnp/upnp.h>
 #include "util.h"
 using namespace upnp_live;
 
@@ -12,14 +11,14 @@ using namespace upnp_live;
  * Splits the input string into a vector of smaller strings using the provided character delimiter
  * If the input is less than 3 characters or the delimiter isn't found, the input string is the vector's only element
  */
-std::vector<std::string> util::SplitString(std::string str, char delimiter)
+std::vector<std::string> util::SplitString(std::string in_str, char delimiter)
 {
-	std::string str2{ TrimString(str, delimiter) };
+	std::string str{ TrimString(in_str, delimiter) };
 
 	std::vector<std::string> v;
-	size_t pos1 = 0, pos2 = str2.find(delimiter);
+	size_t pos1 = 0, pos2 = str.find(delimiter);
 
-	if(str2.size() == 0 || pos2 == std::string::npos)
+	if(str.size() == 0 || pos2 == std::string::npos)
 	{
 		v.push_back(str);
 		return v;
@@ -32,8 +31,7 @@ std::vector<std::string> util::SplitString(std::string str, char delimiter)
 		pos1 = pos2+1;
 		pos2 = str.find(delimiter, pos1);
 	}
-	//If they are equal it means the last char is the delimiter
-	if(pos1 != pos2)
+	if(pos1 != std::string::npos && pos1 < str.size())
 		v.push_back(str.substr(pos1));
 	return v;
 }
@@ -60,16 +58,21 @@ std::vector<std::string> util::SplitArgString(std::string str, char delimiter)
 		if(pos1 != pos2)
 		{
 			if(str[pos1] == '\'')
+			{
 				pos2 = str.find('\'', pos1+1);
+				++pos1;
+			}
 			else if(str[pos1] == '"')
+			{
 				pos2 = str.find('"', pos1+1);
+				++pos1;
+			}
 			v.push_back(str.substr(pos1, pos2-pos1));
 		}
 		pos1 = pos2+1;
 		pos2 = str.find(delimiter, pos1);
 	}
-	//If they are equal it means the last char is the delimiter
-	if(pos1 != pos2)
+	if(pos1 != std::string::npos && pos1 < str.size())
 		v.push_back(str.substr(pos1));
 	return v;
 }
@@ -244,10 +247,10 @@ bool util::IsSymbolicLink(const char* filename)
 		throw std::system_error(errno, std::generic_category());
 	return S_ISLNK(info.st_mode);
 }
-bool util::IsChildDirectory(std::string parent, std::string child)
+/*bool util::IsChildDirectory(std::string parent, std::string child)
 {
 	return false;
-}
+}*/
 std::pair<std::vector<std::string>, std::vector<std::string>> util::GetDirectoryContents(std::string dir)
 {
 	std::vector<std::string> ret_dirs, ret_files;

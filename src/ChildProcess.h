@@ -11,16 +11,16 @@
 
 namespace upnp_live {
 
-//Reads AV data from stdin and/or writes it to stdout
 class ChildProcess
 {
 	public:
 		ChildProcess(std::vector<std::string>& args);
 		
-		std::pair<int, pid_t> InitProcess();
+		std::pair<int, pid_t> InitProcess(bool blocking_out);
 		void ShutdownProcess();
 		bool ProcessInitialized();
-		
+		size_t Write(const char* buf, const size_t len);
+		void SetInput(int fd);
 		
 	protected:
 		const std::string command;
@@ -28,11 +28,11 @@ class ChildProcess
 		std::mutex mutex;
 		int inputPipe {0}; // Child process STDIN gets redirected to this
 		int outputPipe {0};
-		int writePipe {0}; // Used when manually writing to process fd
+		int writePipe {0};
 		pid_t processId {0};
 		Logger* logger;
 };
 
 }
 
-#endif /* CHILDPROCESS_H */
+#endif

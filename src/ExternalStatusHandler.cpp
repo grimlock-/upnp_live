@@ -10,7 +10,7 @@ bool ExternalStatusHandler::GetStatus()
 	pid_t pid;
 	try
 	{
-		pid = InitProcess().second;
+		pid = InitProcess(true).second;
 	}
 	catch(std::exception& e)
 	{

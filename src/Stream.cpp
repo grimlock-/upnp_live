@@ -1,6 +1,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <sstream>
+#include <typeinfo>
 #include <strings.h> //strncasecmp
 #include "Stream.h"
 #include "FileAVHandler.h"
@@ -11,7 +12,7 @@ using namespace upnp_live;
 Stream::Stream(
 	std::string name,
 	std::string mt,
-	std::unique_ptr<AVSource>&& avh,
+	std::unique_ptr<AVHandler>&& avh,
 	std::unique_ptr<StatusHandler>&& sh,
 	std::unique_ptr<Transcoder>&& tr) :
 Name{name},
@@ -24,11 +25,19 @@ transcoder{std::move(tr)}
 
 	if(avHandler == nullptr)
 		throw std::invalid_argument("No AV handler");
-	if(avHandler->SourceType == external && mimeType.empty())
-		throw std::invalid_argument("Mimetype required for external AV handler");
-	if(avHandler->SourceType == file && transcoder == nullptr)
-		throw std::invalid_argument("File AV handler requires transcoder");
-	if(strncasecmp(mimeType.c_str(), "video", 5) != 0 && strncasecmp(mimeType.c_str(), "audio", 5) != 0)
+	try
+	{
+		if(dynamic_cast<ExternalAVHandler*>(*avHandler) && mimeType.empty())
+			throw std::invalid_argument("Mimetype required for external AV handler");
+	}
+	catch(std::bad_cast& e) { }
+	try
+	{
+		if(dynamic_cast<FileAVHandler*>(*avHandler) && transcoder == nullptr)
+			throw std::invalid_argument("Transcoder required for File AV handler");
+	}
+	catch(std::bad_cast& e) { }
+	if(!mimeType.empty() && strncasecmp(mimeType.c_str(), "video", 5) != 0 && strncasecmp(mimeType.c_str(), "audio", 5) != 0)
 		throw std::invalid_argument("Bad Mimetype");
 
 	try
@@ -46,33 +55,46 @@ transcoder{std::move(tr)}
 
 	if(statusHandler == nullptr)
 	{
-		logger->Log_cc(verbose, 3, "No status handler for ", Name.c_str(), "\n");
+		logger->Log_fmt(verbose, "No status handler for %s\n", Name.c_str());
 		streamIsLive = true;
 	}
 	if(transcoder == nullptr)
-		logger->Log_cc(verbose, 3, "No transcoder for ", Name.c_str(), "\n");
+		logger->Log_fmt(verbose, "No transcoder for %s\n", Name.c_str());
 
 }
-int Stream::StartAVHandler()
+void Stream::Start()
 {
-	logger->Log_cc(info, 3, "Starting stream: ", Name.c_str(), "\n");
+	logger->Log_fmt(info, "Starting stream: %s\n", Name.c_str());
 	UpdateReadTime();
-	int fd = avHandler->Init();
 	if(transcoder != nullptr)
 	{
+		ExternalAVHandler* ext = nullptr;
 		try
 		{
-			transcoder->SetSource(fd);
-			fd = transcoder->Init();
+			ext = dynamic_cast<ExternalAVHandler>(*avHandler);
 		}
-		catch(std::exception& e)
+		catch(std::bad_cast& e) { }
+
+		if(ext)
 		{
-			avHandler->Shutdown();
-			throw e;
+			//For ext, the handler process stdout can be duped
+			//to the transcoder process' stdin, but then it needs
+			//to be started first
+			ext->Init();
+			transcoder->SetInput(ext);
+			transcoder->InitProcess(false);
+		}
+		else
+		{
+			transcoder->InitProcess(false);
+			avHandler->SetWriteDestination(transcoder);
+			avHandler->Init();
 		}
 	}
-
-	return fd;
+	else
+	{
+		avHandler->Init();
+	}
 }
 void Stream::StartHeartbeat()
 {
@@ -87,26 +109,24 @@ void Stream::StartHeartbeat()
 //{ Shutdowns
 Stream::~Stream()
 {
-	logger->Log_cc(info, 3, "Destroying stream: ", Name.c_str(), "\n");
+	logger->Log_fmt(info, "Destroying stream: %s\n", Name.c_str());
+	if(IsLive())
+		Stop();
 	try
 	{
 		StopHeartbeat();
 	}
 	catch(std::system_error& e)
 	{
-		logger->Log_cc(error, 5, "Error stopping heartbeat for ", Name.c_str(), ": ", e.what(), "\n");
+		logger->Log_fmt(error, "Error stopping heartbeat for %s: %s\n", Name.c_str(), e.what());
 	}
 }
-void Stream::StopAVHandler() try
+void Stream::Stop()
 {
-	logger->Log_cc(info, 3, "Stopping stream: ", Name.c_str(), "\n");
+	logger->Log_fmt(info, "Stopping stream: %s\n", Name.c_str());
 	if(transcoder != nullptr)
-		transcoder->Shutdown();
+		transcoder->ShutdownProcess();
 	avHandler->Shutdown();
-}
-catch(std::exception& e)
-{
-	logger->Log_cc(error, 5, "Error stopping stream ", Name.c_str(), "\n", e.what(), "\n");
 }
 void Stream::StopHeartbeat()
 {
@@ -148,8 +168,8 @@ void Stream::Heartbeat()
 			}
 			if(delta.count() >= chr::seconds(handlerTimeout.load()).count())
 			{
-				logger->Log_cc(info, 3, "[", Name.c_str(), "] timeout reached\n");
-				StopAVHandler();
+				logger->Log_fmt(info, "[%s] timeout reached\n", Name.c_str());
+				Stop();
 			}
 		}
 		std::this_thread::sleep_for(chr::milliseconds(100));
@@ -157,7 +177,7 @@ void Stream::Heartbeat()
 }
 void Stream::UpdateStatus()
 {
-	logger->Log_cc(debug, 5, "[", Name.c_str(), "] Getting status for ", Name.c_str(), "\n");
+	logger->Log_fmt(debug, "[%s] Getting status\n", Name.c_str());
 	bool live;
 
 	auto one = std::chrono::steady_clock::now();
@@ -170,6 +190,17 @@ void Stream::UpdateStatus()
 	ss << "[" << Name << "] status: " << (live ? "live" : "not live") << " | took " << std::chrono::duration_cast<std::chrono::milliseconds>(two-one).count() << "ms" << "\n";
 	logger->Log(verbose, ss.str());
 	streamIsLive = live;
+}
+
+
+
+
+int Stream::Read(char* buf, size_t len)
+{
+	if(transcoder == nullptr)
+		return avHandler->Read(buf, len);
+	else
+		return transcoder->Read(buf, len);
 }
 
 
@@ -199,13 +230,9 @@ bool Stream::IsLive()
 {
 	return streamIsLive.load();
 }
-bool Stream::HasTranscoder()
-{
-	return transcoder == nullptr;
-}
 std::string Stream::GetFilePath()
 {
-	if(avHandler->SourceType != file)
+	if(avHandler->HandlerType != file)
 		throw std::runtime_error("Not a file stream");
 	
 	auto fh = static_cast<FileAVHandler*>(avHandler.get());
@@ -213,7 +240,7 @@ std::string Stream::GetFilePath()
 }
 void Stream::UpdateReadTime()
 {
-	logger->Log_cc(debig_chungus, 3, "[", Name.c_str(), "] Updating read time\n");
+	logger->Log_fmt(verbose_debug, "[%s] Updating read time\n", Name.c_str());
 	std::lock_guard<std::mutex> guard(readTimeMutex);
 	lastRead = std::chrono::steady_clock::now();
 }

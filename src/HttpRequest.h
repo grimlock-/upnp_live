@@ -1,6 +1,12 @@
 #ifndef HTTPREQUEST_H 
 #define HTTPREQUEST_H
-
+/*
+ * A synchronous HTTP request for a single resource using the
+ * pupnp client API
+ * TODO - Switch to libcurl or something and keep pupnp as a backup
+ * Because of limitations with pupnp, response headers can't
+ * be processed and most redirects can't be followed
+ */
 #include <string>
 #include <vector>
 #include <upnp/upnp.h>

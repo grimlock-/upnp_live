@@ -1,6 +1,7 @@
 upnp_live
 upnp_live.conf
-test
+http_test
+util_test
 *.log
 *.o
 *.swp

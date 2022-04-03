@@ -3,12 +3,13 @@
 #include <sstream>
 #include <exception>
 #include <typeindex>
-#include <string.h> //strerror
+#include <string.h> //strlen
 #include <strings.h> //strncasecmp
 #include <unistd.h>
 #include <sys/time.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <upnp/upnptools.h>
 #include "Server.h"
 #include "MemoryStore.h"
 #include "ExternalStatusHandler.h"
@@ -37,8 +38,6 @@ Server::Server(struct InitOptions& options) : webRoot(options.web_root)
 	if(UpnpAddVirtualDir("/res", reinterpret_cast<const void*>(&RES), nullptr) != UPNP_E_SUCCESS)
 		throw std::runtime_error("Error setting up resources virtual directory");
 
-	//TODO - add API stuff here
-
 	loadXml(options);
 
 	//Initialize components
@@ -54,16 +53,8 @@ Server::Server(struct InitOptions& options) : webRoot(options.web_root)
 	{
 		case UPNP_E_SUCCESS:
 			break;
-		case UPNP_E_INVALID_DESC:
-			throw std::runtime_error("Invalid device description");
-			break;
-		case UPNP_E_FILE_NOT_FOUND:
-			throw std::runtime_error("Could not find device description");
-			break;
 		default:
-			std::string s = "Unknown pupnp error code: ";
-			s += std::to_string(result);
-			throw std::runtime_error(s.c_str());
+			throw std::runtime_error(UpnpGetErrorMessage(result));
 			break;
 	}
 	
@@ -224,15 +215,15 @@ void Server::loadXml(InitOptions& options)
 
 AddStreamResult Server::AddStream(StreamInitOptions& options)
 {
-	logger->Log_cc(verbose, 3, "Creating stream: ", options.name.c_str(), "\n");
+	logger->Log_fmt(verbose, "Creating stream: %s\n", options.name.c_str());
 	
 	//Initialize handlers
-	std::unique_ptr<AVSource> avh {createAVHandler(options.av_handler, options.av_args)};
+	std::unique_ptr<AVHandler> avh {createAVHandler(options.av_handler, options.av_args)};
 	std::unique_ptr<StatusHandler> sh {createStatusHandler(options.status_handler, options.status_args)};
 	std::unique_ptr<Transcoder> transcoder = nullptr;
 	if(!options.transcoder.empty())
 	{
-		std::vector<std::string> v {std::move(util::SplitString(options.transcoder, ' '))};
+		std::vector<std::string> v {std::move(util::SplitArgString(options.transcoder, ' '))};
 		transcoder = std::make_unique<Transcoder>(v);
 	}
 	std::shared_ptr<Stream> newStream = std::make_shared<Stream>(options.name, options.mime_type, std::move(avh), std::move(sh), std::move(transcoder));
@@ -263,45 +254,45 @@ void Server::AddStreams(std::vector<StreamInitOptions>& streams)
 			switch(AddStream(stream))
 			{
 				case success:
-					logger->Log_cc(info, 3, "Stream ", stream.name.c_str(), " created\n");
+					logger->Log_fmt(info, "Stream %s created\n", stream.name.c_str());
 					break;
 				case heartbeatFail:
-					logger->Log_cc(warning, 3, "Stream ", stream.name.c_str(), " created. Error starting heartbeat\n");
+					logger->Log_fmt(warning, "Stream %s created. Error starting heartbeat\n", stream.name.c_str());
 					break;
 				case fail:
-					logger->Log_cc(error, 3, "Stream ", stream.name.c_str(), " already exists or couldn't be created\n");
+					logger->Log_fmt(error, "Stream %s already exists or couldn't be created\n", stream.name.c_str());
 					break;
 			}
 		}
 		catch(std::exception& e)
 		{
-			logger->Log_cc(error, 5, "Error adding stream ", stream.name.c_str(), "\n", e.what(), "\n");
+			logger->Log_fmt(error, "Error adding stream %s\n%s\n", stream.name.c_str(), e.what());
 		}
 	}
 }
-std::unique_ptr<AVSource> Server::createAVHandler(std::string& handlerType, std::string& argstr)
+std::unique_ptr<AVHandler> Server::createAVHandler(std::string& handlerType, std::string& argstr)
 {
 	if(handlerType.empty())
 		throw std::invalid_argument("AV handler type required");
 
-	std::unique_ptr<AVSource> ret;
+	std::unique_ptr<AVHandler> ret;
 	if(strncasecmp(handlerType.c_str(), "ext", 3) == 0 ||
 	strncasecmp(handlerType.c_str(), "cmd", 3) == 0)
 	{
 		logger->Log(debug, "Creating external AV handler\n");
 		std::vector<std::string> v {std::move(util::SplitString(argstr, ' '))};
-		ret = std::unique_ptr<AVSource>(new ExternalAVHandler(v));
+		ret = std::unique_ptr<AVHandler>(new ExternalAVHandler(v));
 	}
 	else if(strncasecmp(handlerType.c_str(), "file", 4) == 0)
 	{
 		logger->Log(debug, "Creating file AV handler\n");
-		ret = std::unique_ptr<AVSource>(new FileAVHandler(argstr));
+		ret = std::unique_ptr<AVHandler>(new FileAVHandler(argstr));
 	}
 	else if(strncasecmp(handlerType.c_str(), "http", 4) == 0)
 	{
 		logger->Log(debug, "Creating http AV handler\n");
 		throw std::runtime_error("http AV handler not implemented");
-		//ret = std::unique_ptr<AVSource>(new HttpAVHandler());
+		//ret = std::unique_ptr<AVHandler>(new HttpAVHandler());
 	}
 	else
 	{
@@ -333,7 +324,7 @@ std::unique_ptr<StatusHandler> Server::createStatusHandler(std::string& handlerT
 	}
 	else
 	{
-		logger->Log_cc(error, 3, "Invalid StatusHandler type: ", handlerType.c_str(), "\n");
+		logger->Log_fmt(error, "Invalid StatusHandler type: %s\n", handlerType.c_str());
 		ret = nullptr;
 	}
 	return ret;
@@ -362,7 +353,7 @@ void Server::AddFile(FileOptions& options)
 	}
 
 	if(!cds->AddFile(options.name, options.mime_type, options.path))
-		logger->Log_cc(error, 3, "Error adding file to CDS: ", options.path.c_str(), "\n");
+		logger->Log_fmt(error, "Error adding file to CDS: %s\n", options.path.c_str());
 }
 void Server::AddFiles(std::vector<FileOptions>& files)
 {
@@ -371,11 +362,11 @@ void Server::AddFiles(std::vector<FileOptions>& files)
 		try
 		{
 			AddFile(file);
-			logger->Log_cc(info, 3, "Added ", file.path.c_str(), " to content directory\n");
+			logger->Log_fmt(info, "Added %s to content directory\n", file.path.c_str());
 		}
 		catch(std::exception& e)
 		{
-			logger->Log_cc(error, 5, "Error adding file ", file.name.c_str(), "\n", e.what(), "\n");
+			logger->Log_fmt(error, "Error adding file %s\n%s\n", file.name.c_str(), e.what());
 		}
 	}
 }
@@ -390,11 +381,11 @@ void Server::RemoveFiles(std::vector<std::string>& files)
 		try
 		{
 			RemoveFile(file);
-			logger->Log_cc(info, 3, "Removed ", file.c_str(), " from content directory\n");
+			logger->Log_fmt(info, "Removed %s from content directory\n", file.c_str());
 		}
 		catch(std::exception& e)
 		{
-			logger->Log_cc(error, 5, "Error removing file ", file.c_str(), "\n", e.what(), "\n");
+			logger->Log_fmt(error, "Error removing file %s\n%s\n", file.c_str(), e.what());
 		}
 	}
 }
@@ -412,181 +403,135 @@ void Server::RemoveFiles(std::vector<std::string>& files)
  * 	DOMString content_type; -> starts as NULL, must be set to a dynamically allocated DOMString (aka c string)
  * }
 */
-int Server::GetInfo(const char* filename, UpnpFileInfo* info, const void* cookie)
+int Server::GetInfo(const char* filename, UpnpFileInfo* info)
 {
-	const vdirs* requestType = reinterpret_cast<const vdirs*>(cookie);
-	switch(*requestType)
+	std::string fname = filename;
+	std::vector<std::string> uri = util::SplitString(fname, '/');
+	if(uri[0] != "res")
 	{
-		case resources:
+		std::string s = "Bad URI: ";
+		s += fname;
+		throw std::runtime_error(s);
+	}
+	
+	std::string mimetype;
+	{
+		std::lock_guard<std::mutex> guard(streamContainerMutex);
+		auto it = streams.find(uri[1]);
+		if(it == streams.end())
+			throw std::runtime_error("stream not found");
+		mimetype = it->second->GetMimeType();
+	}
+	
+	time_t timestamp;
+	time(&timestamp);
+	UpnpFileInfo_set_LastModified(info, timestamp);
+	UpnpFileInfo_set_FileLength(info, -1);
+	UpnpFileInfo_set_IsDirectory(info, 0);
+	UpnpFileInfo_set_IsReadable(info, 1);
+	/*DOMString headers = ixmlCloneDOMString("");
+	UpnpFileInfo_set_ExtraHeaders(info, headers);*/
+	DOMString ctype = ixmlCloneDOMString(mimetype.c_str());
+	UpnpFileInfo_set_ContentType(info, ctype);
+	return 0;
+}
+
+UpnpWebFileHandle Server::Open(const char* filename, enum UpnpOpenFileMode mode)
+{
+	if(mode == UPNP_WRITE)
+	{
+		logger->Log(error, "UPNP_WRITE mode not accepted");
+		return nullptr;
+	}
+	
+	std::string fname(filename);
+	std::vector<std::string> uri = util::SplitString(fname, '/');
+	if(uri[0] != "res" || uri.size() < 2)
+	{
+		logger->Log_fmt(error, "Open(): Bad URI - %s\n", fname.c_str());
+		return nullptr;
+	}
+	
+	std::shared_ptr<Stream> stream_obj;
+
+	{
+		std::unique_lock<std::mutex> streamLock(streamContainerMutex);
+		auto it = streams.find(uri[1]);
+		if(it == streams.end())
 		{
-			std::string fname = filename;
-			std::vector<std::string> uri = util::SplitString(fname, '/');
-			if(uri[0] != "res")
-			{
-				std::string s = "Bad URI: ";
-				s += fname;
-				throw std::runtime_error(s);
-			}
-			
-			std::string mimetype;
-			{
-				std::lock_guard<std::mutex> guard(streamContainerMutex);
-				auto it = streams.find(uri[1]);
-				if(it == streams.end())
-					throw std::runtime_error("stream not found");
-				mimetype = it->second->GetMimeType();
-			}
-			
-			time_t timestamp;
-			time(&timestamp);
-			UpnpFileInfo_set_LastModified(info, timestamp);
-			UpnpFileInfo_set_FileLength(info, -1);
-			UpnpFileInfo_set_IsDirectory(info, 0);
-			UpnpFileInfo_set_IsReadable(info, 1);
-			/*DOMString headers = ixmlCloneDOMString("");
-			UpnpFileInfo_set_ExtraHeaders(info, headers);*/
-			DOMString ctype = ixmlCloneDOMString(mimetype.c_str());
-			UpnpFileInfo_set_ContentType(info, ctype);
+			logger->Log(error, "Open(): No stream named %s\n", uri[1]);
+			return nullptr;
+		}
+		stream_obj = *it;
+	}
+		
+	{
+		std::unique_lock<std::mutex> handleLock(handleMutex);
+		VirtualFileHandle newHandle;
+		newHandle.stream_name = stream_obj->Name;
+		newHandle.data = avStore->CreateHandle(stream_obj);
+		auto handleIt = handles.insert(std::make_pair(stream_obj->Name, newHandle));
+		return reinterpret_cast<UpnpWebFileHandle>(&handleIt->second);
+	}
+}
+
+
+int Server::Close(UpnpWebFileHandle hnd)
+{
+	auto handle = reinterpret_cast<VirtualFileHandle*>(hnd);
+	if(!handle)
+	{
+		logger->Log(error, "Error casting handle");
+		return -1;
+	}
+	avStore->DestroyHandle(handle->data);
+
+	auto range = handles.equal_range(handle->stream_name);
+	for(auto it = range.first; std::distance(it, range.second) > 0; ++it)
+	{
+		if(&it->second == handle)
+		{
+			handles.erase(it);
 			return 0;
 		}
-		break;
-		
-		default:
-			throw std::runtime_error("GetInfo() only supported with resource URLs");
-			break;
 	}
-}
-
-UpnpWebFileHandle Server::Open(const char* filename, enum UpnpOpenFileMode mode, const void* cookie)
-{
-	const vdirs* requestType = reinterpret_cast<const vdirs*>(cookie);
-	switch(*requestType)
-	{
-		case resources:
-		{
-			if(mode == UPNP_WRITE)
-				throw std::invalid_argument("UPNP_WRITE mode not accepted");
-			
-			VirtualFileHandle newHandle;
-			std::string fname(filename);
-			std::vector<std::string> uri = util::SplitString(fname, '/');
-			if(uri[0] != "res" || uri.size() < 2)
-			{
-				std::string s = "Bad URI: ";
-				s += fname;
-				throw std::runtime_error(s);
-			}
-			
-			{
-				std::unique_lock<std::mutex> streamLock(streamContainerMutex, std::defer_lock);
-				std::unique_lock<std::mutex> handleLock(handleMutex, std::defer_lock);
-				std::lock(streamLock, handleLock);
-				auto it = streams.find(uri[1]);
-				if(it == streams.end())
-				{
-					std::string s = "No stream named ";
-					s += uri[1];
-					throw std::runtime_error(s);
-				}
-				
-				newHandle.stream_name = it->second->Name;
-				newHandle.type = avstore;
-				newHandle.data = avStore->CreateHandle(it->second);
-				auto handleIt = handles.insert(std::make_pair(it->second->Name, newHandle));
-
-				std::stringstream ss;
-				ss << "Client handle (" << static_cast<const void*>(&handleIt->second) << ") created for " << handleIt->first << "\n";
-				logger->Log(info, ss.str());
-				return reinterpret_cast<UpnpWebFileHandle>(&handleIt->second);
-			}
-		}
-		break;
-		
-		default:
-			throw std::runtime_error("Open() only supported for resource URLs");
-			break;
-	}
+	logger->Log(error, "Close(): Handle not in container\n");
+	return -1;
 }
 
 
-int Server::Close(UpnpWebFileHandle hnd, const void* cookie)
+int Server::Read(UpnpWebFileHandle hnd, char* buf, std::size_t len)
 {
-	const vdirs* requestType = reinterpret_cast<const vdirs*>(cookie);
-	switch(*requestType)
+	auto handle = reinterpret_cast<VirtualFileHandle*>(hnd);
+	if(!handle)
 	{
-		case resources:
+		logger->Log(error, "Error casting handle");
+		return -1;
+	}
+	//I think pupnp expects read calls to be blocking,
+	//so loop in case we can't read from memory store
+	while(!shuttingDown.load())
+	{
+		try
 		{
-			std::stringstream ss;
-			ss << "Closing client handle " << static_cast<const void*>(hnd) << "\n";
-			logger->Log(info, ss.str());
-			auto handle = static_cast<VirtualFileHandle*>(hnd);
-			if(handle->type == fd)
-			{
-				std::lock_guard<std::mutex> guard(handleMutex);
-				close(fd);
-				auto range = handles.equal_range(handle->stream_name);
-				for(auto it = range.first; std::distance(it, range.second) > 0; ++it)
-				{
-					if(it->second.type == handle->type && it->second.fd == handle->fd)
-						handles.erase(it);
-				}
-				return (handle->fd);
-			}
-			else
-			{
-				return avStore->DestroyHandle(handle->data);
-			}
+			return avStore->Read(handle->data, buf, len);
 		}
-		break;
-		
-		default:
-			throw std::runtime_error("Close() only supported with resource URLs");
-			break;
+		catch(const CantReadBuffer& e)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
 	}
 	return 0;
 }
-
-
-int Server::Read(UpnpWebFileHandle hnd, char* buf, std::size_t len, const void* cookie)
-{
-	const vdirs* requestType = reinterpret_cast<const vdirs*>(cookie);
-	switch(*requestType)
-	{
-		case resources:
-		{
-			auto handle = static_cast<VirtualFileHandle*>(hnd);
-			//FIXME - I expect this may still cause a null pointer dereference when shutting down
-			//so I'll need a better way of shutting down this function
-			while(!shuttingDown.load())
-			{
-				try
-				{
-					int ret = avStore->Read(handle->data, buf, len);
-					return ret;
-				}
-				catch(CantReadBuffer& e)
-				{
-					std::this_thread::sleep_for(std::chrono::milliseconds(100));
-				}
-			}
-			return 0;
-		}
-		break;
-		
-		default:
-			throw std::runtime_error("Read() only supported with resource URLs");
-			break;
-	}
-}
-int Server::Seek(UpnpWebFileHandle hnd, long offset, int origin, const void* cookie)
+int Server::Seek(UpnpWebFileHandle hnd, long offset, int origin)
 {
 	return 0;
 }
-int Server::Write(UpnpWebFileHandle hnd, char* buf, std::size_t len, const void* cookie)
+int Server::Write(UpnpWebFileHandle hnd, char* buf, std::size_t len)
 {
 	return 0;
 }
-int Server::IncomingEvent(Upnp_EventType eventType, const void* event, void* cookie)
+int Server::IncomingEvent(Upnp_EventType eventType, const void* event)
 {
 	switch(eventType)
 	{
@@ -653,14 +598,14 @@ void Server::execStateVarRequest(UpnpStateVarRequest* request)
 	std::string serviceid = UpnpString_get_String(UpnpStateVarRequest_get_ServiceID(request));
 	std::string statevarname = UpnpString_get_String(UpnpStateVarRequest_get_StateVarName(request));
 
-	logger->Log_cc(info, 5, "Received state variable request\nService ID: ", serviceid.c_str(), "State Variable name: ", statevarname.c_str(), "\n");
+	logger->Log_fmt(info, "Received state variable request\nService ID: %s\nState Variable name: %s\n", serviceid.c_str(), statevarname.c_str());
 }
 void Server::execSubscriptionRequest(UpnpSubscriptionRequest* request)
 {
 	std::string serviceid = UpnpString_get_String(UpnpSubscriptionRequest_get_ServiceId(request));
 	std::string udn = UpnpString_get_String(UpnpSubscriptionRequest_get_UDN(request));
 
-	logger->Log_cc(info, 4, "Received subscription request\nUniversal Device Name: ", udn.c_str(), "\nService ID: ", serviceid.c_str());
+	logger->Log_fmt(info, "Received subscription request\nUniversal Device Name: %s\nService ID: %s\n", udn.c_str(), serviceid.c_str());
 }
 //}
 

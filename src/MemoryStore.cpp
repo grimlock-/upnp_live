@@ -12,8 +12,7 @@
 
 using namespace upnp_live;
 
-MemoryStore::MemoryStore() :
-heartbeatThread(&MemoryStore::Heartbeat, this)
+MemoryStore::MemoryStore() : heartbeatThread(&MemoryStore::Heartbeat, this)
 {
 	alive.test_and_set();
 	logger = Logger::GetLogger();
@@ -23,139 +22,167 @@ MemoryStore::~MemoryStore()
 	Shutdown();
 }
 
-void MemoryStore::Shutdown() try
+void MemoryStore::Shutdown()
 {	
 	logger->Log(info, "Stopping MemoryStore...\n");
 	alive.clear();
 	if(heartbeatThread.joinable())
-		heartbeatThread.join();
+	{
+		try
+		{
+			heartbeatThread.join();
+		}
+		catch(std::system_error& e)
+		{
+			logger->Log_fmt(error, "Error joining thread: %s\n", e.what());
+		}
+	}
 }
-catch(std::exception& e)
-{
-	logger->Log_cc(error, 3, "Error stopping memory store\n", e.what(), "\n");
-}
-
-UpnpWebFileHandle MemoryStore::CreateHandle(std::shared_ptr<Stream>& stream)
+/**
+ * Assumes mutex for stream handles is locked
+ */
+std::shared_ptr<StreamHandle> MemoryStore::CreateStreamHandle(std::shared_ptr<Stream>& stream)
 {
 	std::string streamName = stream->Name;
 	std::size_t bufferSize = stream->BufferSize;
-	
-	std::unique_lock<std::shared_timed_mutex> guard1(streamContainerMutex, std::defer_lock);
-	std::unique_lock<std::shared_timed_mutex> guard2(clientContainerMutex, std::defer_lock);
-	std::lock(guard1, guard2);
-	
-	auto streamIt = streamHandles.find(streamName);
-	if(streamIt == streamHandles.end())
+	logger->Log_fmt(info, "[MemoryStore] Creating StreamHandle for %s | Buffer size: %d\n", streamName.c_str(), bufferSize);
+	try
 	{
-		logger->Log_cc(info, 5, "[MemoryStore] Creating StreamHandle for ", streamName.c_str(), " | Buffer size: ", std::to_string(bufferSize).c_str(), "\n");
-		try
-		{
-			int fd = stream->StartAVHandler();
-			fcntl(fd, F_SETFL, O_NONBLOCK);
-			auto newHandle = std::make_shared<StreamHandle>(bufferSize, fd, stream);
-			auto result = streamHandles.insert(std::make_pair(streamName, newHandle));
-			if(result.second)
-			{
-				streamIt = result.first;
-			}
-			else
-			{
-				std::string s = "Error adding ";
-				s += streamName;
-				s += "handle to MemoryStore container\n";
-				throw std::runtime_error(s);
-			}
-		}
-		catch(AlreadyInitializedException& e)
-		{
-			throw std::runtime_error("Stream already initialized, but couldn't find handle");
-		}
+		stream->Start();
+	}
+	catch(std::runtime_error& e)
+	{
+		logger->Log_fmt(error, "Error starting stream\n%s\n", e.what());
+		throw std::runtime_error("Couldn't start stream");
 	}
 
-	//FIXME - emplace() and std::pair's piecewise_construct were giving me trouble, so just use insert instead
-	ClientHandle newHandle(streamIt->second, GetId());
-	auto clientIt = clientHandles.insert(std::make_pair(streamName, newHandle));
-	/*auto clientIt = clientHandles.emplace(std::make_pair(std::piecewise_construct,
-						std::forward_as_tuple(streamName),
-						std::forward_as_tuple(streamIt->second, GetId())));*/
-	std::stringstream ss;
-	ss << "[MemoryStore] Created client handle (" << clientIt->second.id << ") for " << streamName << "\n";
-	logger->Log(info, ss.str());
-	return reinterpret_cast<UpnpWebFileHandle>(&clientIt->second);
+	auto newHandle = std::make_shared<StreamHandle>(bufferSize, stream);
+	auto pair = streamHandles.insert(std::make_pair(streamName, newHandle));
+	if(!pair.second)
+		throw std::runtime_error("Couldn't add stream handle to container");
+	return pair.first->second;
+}
+UpnpWebFileHandle MemoryStore::CreateHandle(std::shared_ptr<Stream>& stream)
+{
+	/*These two lock sections were originally combined with std::defer_lock to negate
+	the possibility of the AV handler timing out while waiting to lock the client
+	handle mutex, but with a timeout of 10 seconds and the infrequency of client
+	container modification this isn't really a concern*/
+	std::shared_ptr<StreamHandle> stream_handle;
+
+	{
+		std::unique_lock<std::shared_timed_mutex> guard(streamContainerMutex);
+		auto streamIt = streamHandles.find(stream->Name);
+		if(streamIt != streamHandles.end())
+			stream_handle = streamIt->second;
+		else
+			stream_handle = CreateStreamHandle(stream);
+	}
+
+	auto newid = GetId();
+	UpnpWebFileHandle ret = nullptr;
+	ClientHandle newHandle(stream_handle, newid);
+
+	{
+		std::unique_lock<std::shared_timed_mutex> guard(clientContainerMutex);
+		auto clientIt = clientHandles.insert(std::make_pair(stream_handle->stream_name, newHandle));
+		ret = reinterpret_cast<UpnpWebFileHandle>(&clientIt->second);
+	}
+
+	if(ret)
+		logger->Log_fmt(info, "[MemoryStore] Created client handle (%d) for %s\n", newid, stream->Name.c_str());
+	else
+		logger->Log_fmt(error, "[MemoryStore] Failed to create client handle for %s\n", stream->Name.c_str());
+	return ret;
 }
 
-int MemoryStore::DestroyHandle(UpnpWebFileHandle hnd)
+void MemoryStore::DestroyHandle(UpnpWebFileHandle hnd)
 {
 	auto clientHandle = reinterpret_cast<ClientHandle*>(hnd);
-	logger->Log_cc(info, 3, "[MemoryStore] Closing client handle ", std::to_string(clientHandle->id).c_str(), "\n");
-	auto range = clientHandles.equal_range(clientHandle->stream_name);
-	for(auto it = range.first; std::distance(it, range.second) > 0; ++it)
+	logger->Log_fmt(info, "[MemoryStore] Closing client %d\n", clientHandle->id);
+
+	std::string stream_name = clientHandle->stream_name;
+	int count {0};
+
 	{
-		if(it->second.id == clientHandle->id)
+		std::unique_lock<std::shared_timed_mutex> guard(clientContainerMutex);
+		auto range = clientHandles.equal_range(clientHandle->stream_name);
+		for(auto it = range.first; std::distance(it, range.second) > 0; ++it)
 		{
-			clientHandles.erase(it);
-			return 0;
+			if(it->second.id == clientHandle->id)
+			{
+				clientHandles.erase(it);
+			}
 		}
+
+		auto range2 = clientHandles.equal_range(clientHandle->stream_name);
+		count = std::distance(range2.first, range2.second);
 	}
-	throw std::runtime_error("Could not find client handle");
+
+	if(count == 0)
+		RemoveStreamHandle(stream_name);
+}
+
+void MemoryStore::RemoveStreamHandle(std::string stream_name)
+{
+	std::unique_lock<std::shared_timed_mutex> guard(streamContainerMutex);
+	streamHandles.erase(stream_name);
 }
 
 int MemoryStore::Read(UpnpWebFileHandle hnd, char* buf, std::size_t len)
 {
 	auto clientHandle = reinterpret_cast<ClientHandle*>(hnd);
+	auto streamHandle = clientHandle->stream_handle;
 
-	std::unique_lock<std::shared_timed_mutex> lock(streamContainerMutex);
-	if(auto streamHandle = clientHandle->stream_handle.lock())
+	if(auto stream = streamHandle->stream_obj.lock())
+		stream->UpdateReadTime();
+
+	std::shared_lock<std::shared_timed_mutex> rw_lock(streamHandle->rw_mutex);
+	if(clientHandle->head == -1)
 	{
-		lock.unlock();
-		if(auto stream = streamHandle->stream_obj.lock())
-			stream->UpdateReadTime();
-
-		std::shared_lock<std::shared_timed_mutex> rw_lock(streamHandle->rw_mutex);
-		if(clientHandle->head == -1)
+		logger->Log_fmt(verbose_debug, "[MemoryStore] Client %d: %s buffer uninitialized\n", clientHandle->id, clientHandle->stream_name.c_str());
+		throw CantReadBuffer();
+	}
+	else if(clientHandle->head == streamHandle->tail)
+	{
+		if(streamHandle->finished)
 		{
-			logger->Log_cc(debig_chungus, 3, "[MemoryStore] ", clientHandle->stream_name.c_str(), " buffer uninitialized\n");
+			logger->Log_fmt(verbose_debug, "[MemoryStore] Client %d: Finished reading stream\n", clientHandle->id, clientHandle->stream_name.c_str());
+			return 0;
+		}
+		else
+		{
+			logger->Log_fmt(verbose_debug, "[MemoryStore] Client %d: %s buffer empty\n", clientHandle->id, clientHandle->stream_name.c_str());
 			throw CantReadBuffer();
 		}
-		else if(clientHandle->head == streamHandle->tail)
-		{
-			logger->Log_cc(debig_chungus, 5, "Client handle (", std::to_string(clientHandle->id).c_str(), "): ", clientHandle->stream_name.c_str(), " buffer empty\n");
-			throw CantReadBuffer();
-		}
+	}
 
-		logger->Log_cc(debig_chungus, 5, "Client handle (", std::to_string(clientHandle->id).c_str(), ") requesting ", std::to_string(len).c_str(), " bytes\n");
-		
-		int bytes_written = 0;
-		char* tBuf = buf;
-		std::size_t head, target;
-		std::size_t tail = streamHandle->tail;
-		while(len > 0 && clientHandle->head != streamHandle->tail)
-		{
-			head = clientHandle->head;
-			//Target = one past last byte to read
-			//start at the lesser of all requested bytes and buffer end
-			target = head+len > streamHandle->len ? streamHandle->len : head+len;
-			
-			//Don't read tail or past it
-			if(tail > head && tail < target)
-				target = tail;
-			
-			std::size_t num_bytes = target - head;
-			memcpy(tBuf, &streamHandle->buf_start[head], num_bytes);
-			tBuf += num_bytes;
-			bytes_written += num_bytes;
-			len -= num_bytes;
-			clientHandle->head = (clientHandle->head + num_bytes) % streamHandle->len;
-		}
-		
-		return bytes_written;
-	}
-	else
+	logger->Log_fmt(verbose_debug, "[MemoryStore] Client %d requested %d bytes\n", clientHandle->id, len);
+	
+	int bytes_written = 0;
+	char* tBuf = buf;
+	std::size_t head, target;
+	std::size_t tail = streamHandle->tail;
+	while(len > 0 && clientHandle->head != streamHandle->tail)
 	{
-		std::stringstream ss;
-		ss << "StreamHandle for " << clientHandle->id << " has been invalidated";
-		throw std::runtime_error(ss.str());
+		head = clientHandle->head;
+		//Target = one past last byte to read
+		//start at the lesser of all requested bytes and buffer end
+		target = head+len > streamHandle->len ? streamHandle->len : head+len;
+		
+		//Don't read tail or past it
+		if(tail > head && tail < target)
+			target = tail;
+		
+		std::size_t num_bytes = target - head;
+		memcpy(tBuf, &streamHandle->buf_start[head], num_bytes);
+		tBuf += num_bytes;
+		bytes_written += num_bytes;
+		len -= num_bytes;
+		clientHandle->head = (clientHandle->head + num_bytes) % streamHandle->len;
 	}
+	
+	return bytes_written;
 }
 
 /*
@@ -163,44 +190,58 @@ int MemoryStore::Read(UpnpWebFileHandle hnd, char* buf, std::size_t len)
  */
 void MemoryStore::Heartbeat()
 {
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	while(alive.test_and_set())
 	{
-		logger->Log(debig_chungus, "[MemoryStore] Heartbeat\n");
-		try
+		logger->Log(verbose_debug, "[MemoryStore] Heartbeat tick\n");
+
+		//Copy streamhandle pointers to array
+		std::unique_lock<std::shared_timed_mutex> lock(streamContainerMutex);
+		std::pair<std::string, std::shared_ptr<StreamHandle>> t_streams[streamHandles.size()];
+		int count = -1;
+		for(auto& streamIt : streamHandles)
 		{
-			//Copy streamhandle pointers to array
-			std::unique_lock<std::shared_timed_mutex> lock(streamContainerMutex);
-			std::pair<std::string, std::shared_ptr<StreamHandle>> t_streams[streamHandles.size()];
-			int count = -1;
-			for(auto& streamIt : streamHandles)
-			{
-				t_streams[++count].first = streamIt.first;
-				t_streams[count].second = streamIt.second;
-			}
-			//release mutex since the new shared pointers will keep the structs alive even if they're removed from the container
-			lock.unlock();
-			for(auto& hnd : t_streams)
-			{
-				try
-				{
-					WriteToBuffer(hnd.second);
-				}
-				catch(std::exception& e)
-				{
-					logger->Log_cc(error, 5, "[MemoryStore] Error filling buffer for ", hnd.first.c_str(), "\n", e.what(), "\n");
-				}
-			}
+			t_streams[++count].first = streamIt.first;
+			t_streams[count].second = streamIt.second;
 		}
-		catch(std::exception& e)
+		//release mutex since the new shared pointers will keep the structs alive even if they're removed from the container
+		lock.unlock();
+
+		for(auto& hnd : t_streams)
 		{
-			logger->Log_cc(error, 3, "[MemoryStore] heartbeat error: ", e.what(), "\n");
+			if(hnd.second->finished)
+			{
+				logger->Log_fmt(verbose_debug, "[MemoryStore] Skipping finished stream %s\n", hnd.first.c_str());
+				continue;
+			}
+			try
+			{
+				GetAVData(hnd.second);
+			}
+			catch(const EofReached& e)
+			{
+				logger->Log_fmt(info, "[MemoryStore] %s: EOF reached\n", hnd.first.c_str());
+				hnd.second->finished = true;
+				RemoveStreamHandle(hnd.first);
+			}
+			catch(const std::system_error& e)
+			{
+				logger->Log_fmt(error, "[MemoryStore] %s: Error filling buffer\n%s\n", hnd.first.c_str(), e.what());
+				hnd.second->finished = true;
+				RemoveStreamHandle(hnd.first);
+			}
+			catch(const std::runtime_error& e)
+			{
+				logger->Log_fmt(error, "[MemoryStore] %s: Error filling buffer\n%s\n", hnd.first.c_str(), e.what());
+				hnd.second->finished = true;
+				RemoveStreamHandle(hnd.first);
+			}
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 }
 
-void MemoryStore::WriteToBuffer(std::shared_ptr<StreamHandle>& streamHandle)
+void MemoryStore::GetAVData(std::shared_ptr<StreamHandle>& streamHandle)
 {
 	std::unique_lock<std::shared_timed_mutex> rw_lock(streamHandle->rw_mutex, std::defer_lock);
 	std::unique_lock<std::shared_timed_mutex> container_lock(clientContainerMutex, std::defer_lock);
@@ -211,28 +252,25 @@ void MemoryStore::WriteToBuffer(std::shared_ptr<StreamHandle>& streamHandle)
 	const std::size_t num_bytes = len - start;
 
 	//write to buffer end
-	int bytes_written = read(streamHandle->fd, &streamHandle->buf_start[start], num_bytes);
-	int err = errno;
-	
-	switch(bytes_written)
+	int bytes_written = 0;
+	if(auto stream = streamHandle->stream_obj.lock())
 	{
-		case -1:
-		{
-			if(err == EAGAIN)
-				return;
-			if(err == EBADF || err == EINVAL)
-			{
-				logger->Log_cc(error, 3, "[MemoryStore] ", streamHandle->stream_name.c_str(), ": Bad file descriptor, stopping stream...\n");
-				if(auto stream = streamHandle->stream_obj.lock())
-					stream->StopAVHandler();
-				streamHandles.erase(streamHandle->stream_name);
-			}
-			throw std::system_error(err, std::generic_category());
-		}
-		case 0:
-			return;
+		bytes_written = stream->Read(&streamHandle->buf_start[start], num_bytes);
 	}
-	logger->Log_cc(debig_chungus, 5, "[MemoryStore] ", streamHandle->stream_name.c_str(), ": ", std::to_string(bytes_written).c_str(), " bytes written\n");
+	else
+	{
+		throw std::runtime_error("Could not access stream object");
+	}
+	
+	if(!bytes_written)
+	{
+		logger->Log_fmt(verbose_debug, "[MemoryStore] %s: No bytes to read\n", streamHandle->stream_name.c_str());
+		return;
+	}
+	else
+	{
+		logger->Log_fmt(verbose_debug, "[MemoryStore] %s: %d bytes read\n", streamHandle->stream_name.c_str(), bytes_written);
+	}
 	
 	//Move any invalidated heads
 	int32_t next_tail = (streamHandle->tail + bytes_written) % len;

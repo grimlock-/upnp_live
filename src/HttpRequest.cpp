@@ -1,10 +1,3 @@
-/*
- * A single HTTP request made using pupnp client API. 
- * Might switch to libcurl and keep pupnp as a backup option.
- * Because of limitations with pupnp, response headers can't
- * be processed and redirects can't be followed
- */
-
 #include <iostream>
 #include <exception>
 #include <stdexcept>

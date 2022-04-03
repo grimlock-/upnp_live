@@ -6,7 +6,8 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
-#include <signal.h>
+#include <csignal>
+//#include <signal.h>
 #include <unistd.h>
 #include <upnp/upnp.h>
 
@@ -30,10 +31,10 @@ static Server* server;
 static Logger* logger;
 static DirectoryMonitor* dirMonitor;
 
-void shutdown(int signal)
+extern "C" void handle_signal(int signal)
 {
 	if(++shutdown_count >= 3)
-		exit(1);
+		std::abort();
 	shutdown_flag.clear();
 }
 
@@ -46,11 +47,11 @@ int getInfoCallback(const char* filename, UpnpFileInfo* info, const void* cookie
 int getInfoCallback(const char* filename, UpnpFileInfo* info, const void* cookie, const void** request_cookie) try
 #endif
 {
-	return server->GetInfo(filename, info, cookie);
+	return server->GetInfo(filename, info);
 }
 catch(std::exception& e)
 {
-	logger->Log_cc(error, 5, "Error getting virtual file info: ", filename, "\n", e.what(), "\n");
+	logger->Log_fmt(error, "Error getting virtual file info: %s\n%s\n", filename, e.what());
 	return -1;
 }
 #if UPNP_VERSION_MINOR <= 8
@@ -59,11 +60,16 @@ UpnpWebFileHandle openCallback(const char* filename, enum UpnpOpenFileMode mode,
 UpnpWebFileHandle openCallback(const char* filename, enum UpnpOpenFileMode mode, const void* cookie, const void* request_cookie) try
 #endif
 {
-	return server->Open(filename, mode, cookie);
+	return server->Open(filename, mode);
 }
-catch(std::exception& e)
+catch(const std::runtime_error& e)
 {
-	logger->Log_cc(error, 5, "Error opening virtual file: ", filename, "\n", e.what(), "\n");
+	logger->Log_fmt(error, "Error opening virtual file: %s\n%s\n", filename, e.what());
+	return nullptr;
+}
+catch(const std::bad_alloc& e)
+{
+	logger->Log_fmt(error, "Error opening virtual file: %s\n%s\n", filename, e.what());
 	return nullptr;
 }
 #if UPNP_VERSION_MINOR <= 8
@@ -72,11 +78,11 @@ int closeCallback(UpnpWebFileHandle fh, const void* cookie) try
 int closeCallback(UpnpWebFileHandle fh, const void* cookie, const void* request_cookie) try
 #endif
 {
-	return server->Close(fh, cookie);
+	return server->Close(fh);
 }
-catch(std::exception& e)
+catch(const std::bad_alloc& e)
 {
-	logger->Log_cc(error, 3, "Error closing virtual file: ", e.what(), "\n");
+	logger->Log_fmt(error, "Error closing virtual file: %s\n", e.what());
 	return -1;
 }
 #if UPNP_VERSION_MINOR <= 8
@@ -85,42 +91,32 @@ int readCallback(UpnpWebFileHandle handle, char* buf, std::size_t len, const voi
 int readCallback(UpnpWebFileHandle handle, char* buf, std::size_t len, const void* cookie, const void* request_cookie) try
 #endif
 {
-	return server->Read(handle, buf, len, cookie);
+	return server->Read(handle, buf, len);
 }
-catch(std::exception& e)
+catch(const std::bad_alloc& e)
 {
-	logger->Log_cc(error, 3, "Error reading virtual file: ", e.what(), "\n");
-	return 0;
-}
-#if UPNP_VERSION_MINOR <= 8
-int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie) try
-#else
-int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie, const void* request_cookie) try
-#endif
-{
-	return server->Seek(fh, offset, origin, cookie);
-}
-catch(std::exception& e)
-{
-	logger->Log_cc(error, 3, "Error seeking virtual file: ", e.what(), "\n");
+	logger->Log_fmt(error, "Error reading virtual file: %s\n", e.what());
 	return -1;
 }
 #if UPNP_VERSION_MINOR <= 8
-int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie) try
+int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie)
 #else
-int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie, const void* request_cookie) try
+int seekCallback(UpnpWebFileHandle fh, long offset, int origin, const void* cookie, const void* request_cookie)
 #endif
 {
-	return server->Write(fh, buf, len, cookie);
+	return server->Seek(fh, offset, origin);
 }
-catch(std::exception& e)
+#if UPNP_VERSION_MINOR <= 8
+int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie)
+#else
+int writeCallback(UpnpWebFileHandle fh, char* buf, std::size_t len, const void* cookie, const void* request_cookie)
+#endif
 {
-	logger->Log_cc(error, 3, "Error writing virtual file: ", e.what(), "\n");
-	return 0;
+	return server->Write(fh, buf, len);
 }
 int IncomingEvent(Upnp_EventType eventType, const void* event, void* cookie) try
 {
-	return server->IncomingEvent(eventType, event, cookie);
+	return server->IncomingEvent(eventType, event);
 }
 catch(std::exception& e)
 {
@@ -162,10 +158,21 @@ int main(int argc, char* argv[])
 	setrlimit(RLIMIT_CORE, &core);
 #endif
 	//FIXME - signal()'s behaviour is undefined in multi-threaded environments, look and see if this holds true for sigaction() as well
-	struct sigaction signal_struct {0};
-	signal_struct.sa_handler = &shutdown;
+	/*struct sigaction signal_struct {0};
+	signal_struct.sa_handler = &handle_signal;
 	sigaction(SIGINT, &signal_struct, nullptr);
-	sigaction(SIGTERM, &signal_struct, nullptr);
+	sigaction(SIGTERM, &signal_struct, nullptr);*/
+	auto sigres = std::signal(SIGINT, handle_signal);
+	if(sigres == SIG_ERR)
+	{
+		std::cout << "Error setting SIG_ERR handler" << std::endl;
+		std::abort();
+	}
+	sigres = std::signal(SIGTERM, handle_signal);
+	{
+		std::cout << "Error setting SIGTERM handler" << std::endl;
+		std::abort();
+	}
 
 
 	//Process arguments and config file
@@ -177,7 +184,7 @@ int main(int argc, char* argv[])
 
 
 	//Start logger
-	logger = new Logger();
+	logger = new Logger(&std::cout, &std::cerr);
 	Logger::SetLogger(logger);
 	logger->SetLogLevel(static_cast<log_level>(options.log_level));
 	const char* lv;
@@ -211,48 +218,44 @@ int main(int argc, char* argv[])
 			lv = "bad value";
 			break;
 	}
-	logger->Log_cc(always, 3, "Logger set to ", lv, "\n");
+	logger->Log_fmt(always, "Logger set to %s\n", lv);
 
-	logger->Log_cc(debug, 23, "InitOptions struct:\n", \
-	"web root: ", options.web_root.c_str(), "\n", \
-	"config file: ", options.config_file.c_str(), "\n", \
-	"log file: ", options.log_file.c_str(), "\n", \
-	"log level: ", std::to_string(options.log_level).c_str(), "\n", \
-	"address: ", options.address.c_str(), "\n", \
-	"interface: ", options.interface.c_str(), "\n", \
-	"daemonize: ", std::to_string(options.daemon).c_str(), "\n\n", \
-	"streams:\n");
+	logger->Log_fmt(debug, "Web root: %s\nconfig file: %s\nlog file: %s\nlog level: %d\naddress: %s\ninterface: %s\nrun in background: %s\nstreams:\n", \
+	options.web_root.c_str(), \
+	options.config_file.c_str(), \
+	options.log_file.c_str(), \
+	options.log_level, \
+	options.address.c_str(), \
+	options.interface.c_str(), \
+	std::to_string(options.background).c_str());
 	for(auto& str : options.streams)
 	{
-		logger->Log_cc(debug, 23, str.name.c_str(), "\n", \
-		"  status handler: ", str.status_handler.c_str(), "\n", \
-		"  arguments: ", str.status_args.c_str(), "\n", \
-		"  av handler: ", str.av_handler.c_str(), "\n", \
-		"  arguments: ", str.av_args.c_str(), "\n", \
-		"  transcoder: ", str.transcoder.c_str(), "\n", \
-		"  mime type: ", str.mime_type.c_str(), "\n", \
-		"  buffer size: ", std::to_string(str.buffer_size).c_str(), "\n\n");
+		logger->Log_fmt(debug, "  name: %s\n  status handler: %s %s\n  av handler: %s %s\n  transcoder: %s\n  mime type: %s\n  buffer size: %d\n\n", str.name.c_str(), \
+		str.status_handler.c_str(), \
+		str.status_args.c_str(), \
+		str.av_handler.c_str(), \
+		str.av_args.c_str(), \
+		str.transcoder.c_str(), \
+		str.mime_type.c_str(), \
+		str.buffer_size);
 	}
 	logger->Log(debug, "files:\n");
 	for(auto& f : options.files)
 	{
-		logger->Log_cc(debug, 9, "  Friendly name: ", f.name.c_str(), "\n", \
-		"  path: ", f.path.c_str(), "\n", \
-		"  mimetype: ", f.mime_type.c_str(), "\n");
+		logger->Log_fmt(debug, "  Name: %s\n  path: %s\n  mimetype: %s\n", f.name.c_str(), f.path.c_str(), f.mime_type.c_str());
 	}
 	logger->Log(debug, "directories:\n");
 	for(auto& d: options.directories)
 	{
-		logger->Log_cc(debug, 3, "  ", d.path.c_str(), "\n");
+		logger->Log_fmt(debug, "  %s\n", d.path.c_str());
 	}
 
 	//Daemonize if needed
-	if(options.daemon)
+	if(options.background)
 	{
-		
 		logger->Log(info, "Daemon flag set. Forking now\n");
 		if(daemon(1, 0) == -1)
-			logger->Log(error, "Error forking process for daemon mode\n");
+			logger->Log(error, "Error forking process to run in background\n");
 	}
 
 	//Library init
@@ -295,8 +298,9 @@ int main(int argc, char* argv[])
 	}
 
 	auto timet = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	//logger->Log_cc(always, 7, "UPnP library initialized  ", std::put_time(std::localtime(&timet), "%F %T"), "\nIP Address: ", UpnpGetServerIpAddress(), "\nPort: ", UpnpGetServerPort(), "\n");
-	std::cout << "UPnP library initialized  " << std::put_time(std::localtime(&timet), "%F %T") << "\nIP Address: " << UpnpGetServerIpAddress() << "\nPort: " << UpnpGetServerPort() << "\n";
+	std::stringstream ss;
+	ss << "UPnP library initialized  " << std::put_time(std::localtime(&timet), "%F %T") << "\nIP Address: " << UpnpGetServerIpAddress() << "\nPort: " << UpnpGetServerPort() << "\n";
+	logger->Log(info, ss.str());
 
 	//Server init
 	auto serverOne = std::chrono::steady_clock::now();
@@ -306,14 +310,14 @@ int main(int argc, char* argv[])
 	}
 	catch (std::exception& e)
 	{
-		logger->Log_cc(error, 3, "Server initialization failed\n", e.what(), "\n");
+		logger->Log_fmt(error, "Server initialization failed\n%s\n", e.what());
 		return 1;
 	}
 
 	{
 		auto serverTwo = std::chrono::steady_clock::now();
 		auto milli = std::chrono::duration_cast<std::chrono::milliseconds>(serverTwo-serverOne).count();
-		std::stringstream ss;
+		ss.str("");
 		ss << "Server initialized in " << milli << "ms\n";
 		logger->Log(info, ss.str());
 	}
@@ -326,7 +330,10 @@ int main(int argc, char* argv[])
 		{
 			dirMonitor = new DirectoryMonitor();
 		}
-		catch(std::system_error& e) {logger->Log_cc(error, 3, "Error creating Directory Monitor object, the server will not react to filesystem changes\nError: ", e.what(), "\n");}
+		catch(std::system_error& e)
+		{
+			logger->Log_fmt(error, "Error creating Directory Monitor object, the server will not react to filesystem changes\nError: %s\n", e.what());
+		}
 
 		std::size_t watch_count = 0;
 
@@ -335,7 +342,7 @@ int main(int argc, char* argv[])
 		{
 			std::string path = options.web_root + "/" + dir.path;
 			if(logger->GetLogLevel() < verbose)
-				logger->Log_cc(info, 3, "Monitoring directory: ", path.c_str(), "\n");
+				logger->Log_fmt(info, "Monitoring directory: %s\n", path.c_str());
 			try
 			{
 				dirMonitor->AddDirectory(path);
@@ -343,7 +350,7 @@ int main(int argc, char* argv[])
 			}
 			catch(std::system_error& e)
 			{
-				logger->Log_cc(error, 5, "Error creating watch for ", path.c_str(), ", ther server will not react to filesystem changes in this directory\nError: ", e.what(), "\n");
+				logger->Log_fmt(error, "Error creating watch for %s, the server will not react to filesystem changes in this directory\nError: %s\n", path.c_str(), e.what());
 			}
 			auto contents = util::GetDirectoryContents(path);
 			for(auto& file : contents.first)
@@ -365,8 +372,8 @@ int main(int argc, char* argv[])
 						dirMonitor->AddDirectory(d);
 						++watch_count;
 					}
-					catch(std::invalid_argument& e) {logger->Log_cc(error, 3, "Directory does not exist: ", d.c_str(), "\n"); continue;}
-					catch(std::system_error& e) {logger->Log_cc(error, 3, "Error creating inotify watch: ", e.what(), "\n"); continue;}
+					catch(std::invalid_argument& e) {logger->Log_fmt(error, "Directory does not exist: %s\n", d.c_str()); continue;}
+					catch(std::system_error& e) {logger->Log_fmt(error, "Error creating inotify watch: %s\n", e.what()); continue;}
 				}
 			}
 		}
@@ -385,9 +392,7 @@ int main(int argc, char* argv[])
 	logger->Log(debug, "files after parsing directories:\n");
 	for(auto& f : options.files)
 	{
-		logger->Log_cc(debug, 9, "  Friendly name: ", f.name.c_str(), "\n", \
-		"  path: ", f.path.c_str(), "\n", \
-		"  mimetype: ", f.mime_type.c_str(), "\n");
+		logger->Log_fmt(debug, "  Friendly name: %s\n  path: %s\n  mimetype: %s\n", f.name.c_str(), f.path.c_str(), f.mime_type.c_str());
 	}
 
 	//Add streams from options
@@ -411,8 +416,8 @@ int main(int argc, char* argv[])
 		logger->Log(error, "Error registering Seek callback\n");
 
 	//Main loop
-	if(!options.daemon)
-		logger->Log(info, "No daemon flag set. Imma' just chill and let you know what's what\n");
+	if(!options.background)
+		logger->Log(info, "No background flag set. Imma' just chill and let you know what's what\n");
 	shutdown_flag.test_and_set();
 	while(shutdown_flag.test_and_set())
 	{
@@ -425,7 +430,7 @@ int main(int argc, char* argv[])
 				{
 					case file_create:
 					{
-						logger->Log_cc(info, 3, "Adding ", e.path.c_str(), " to content directory\n");
+						logger->Log_fmt(info, "Adding %s to content directory\n", e.path.c_str());
 						FileOptions f;
 						f.name = e.path.substr(e.path.find_last_of("/")+1);
 						f.path = e.path.substr(options.web_root.size()+1);
@@ -433,13 +438,13 @@ int main(int argc, char* argv[])
 						{
 							server->AddFile(f);
 						}
-						catch(std::exception& e) {logger->Log_cc(error, 5, "Error adding newly created file ", f.path.c_str(), ": ", e.what(), "\n");}
+						catch(std::exception& e) {logger->Log_fmt(error, "Error adding newly created file %s: %s\n", f.path.c_str(), e.what());}
 					}
 					break;
 
 					case file_delete:
 					{
-						logger->Log_cc(info, 3, "Removing ", e.path.c_str(), " from content directory\n");
+						logger->Log_fmt(info, "Removing %s from content directory\n", e.path.c_str());
 						server->RemoveFile(e.path.substr(e.path.find_last_of("/")+1));
 					}
 					break;

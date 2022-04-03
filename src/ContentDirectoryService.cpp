@@ -81,7 +81,7 @@ void ContentDirectoryService::Heartbeat()
 				{
 					if(isLive)
 					{
-						logger->Log_cc(info, 3, "Adding ", stream.second->Name.c_str(), " to content directory\n");
+						logger->Log_fmt(info, "Adding %s to content directory\n", stream.second->Name.c_str());
 						CDResource newItem;
 						newItem.name = stream.second->Name;
 						newItem.mime_type = stream.second->GetMimeType();
@@ -96,7 +96,7 @@ void ContentDirectoryService::Heartbeat()
 				{
 					if(!isLive)
 					{
-						logger->Log_cc(info, 3, "Removing ", stream.second->Name.c_str(), " from content directory\n");
+						logger->Log_fmt(info, "Removing %s from content directory\n", stream.second->Name.c_str());
 						liveStreams.erase(stream.second->Name);
 					}
 				}
@@ -115,12 +115,12 @@ void ContentDirectoryService::ExecuteAction(UpnpActionRequest* request)
 	DOMString requestXML = ixmlDocumenttoString(UpnpActionRequest_get_ActionRequest(request));
 	if(requestXML == nullptr)
 	{
-		logger->Log_cc(error, 3, "[ContentDirectoryService] Error converting ", actionName.c_str(), " action to string\n");
+		logger->Log_fmt(error, "[ContentDirectoryService] Error converting %s action to string\n", actionName.c_str());
 		return;
 	}
 	else
 	{
-		logger->Log_cc(debug, 5, "[ContentDirectoryService] Recieved action: ", actionName.c_str(), "\n", requestXML, "\n");
+		logger->Log_fmt(debug, "[ContentDirectoryService] Recieved action: %s\n%s\n", actionName.c_str(), requestXML);
 		ixmlFreeDOMString(requestXML);
 	}
 	
@@ -216,8 +216,8 @@ void ContentDirectoryService::ExecuteAction(UpnpActionRequest* request)
 		}
 		catch(std::pair<int, const char*> err)
 		{
-			logger->Log_cc(error, 3, "Error handling action request: ", actionName.c_str(), "\n");
-			logger->Log_cc(error, 5, "Error ", std::to_string(err.first).c_str(), " ", err.second, "\n");
+			logger->Log_fmt(error, "Error handling action request: %s\n", actionName.c_str());
+			logger->Log_fmt(error, "Error %s: %s\n", std::to_string(err.first).c_str(), err.second);
 			UpnpActionRequest_set_ErrCode(request, err.first);
 			UpnpString* errorString = UpnpString_new();
 			UpnpString_set_String(errorString, err.second);
@@ -228,7 +228,7 @@ void ContentDirectoryService::ExecuteAction(UpnpActionRequest* request)
 	}
 	else
 	{
-		logger->Log_cc(info, 3, "Unknown action request: ", actionName.c_str(), "\n");
+		logger->Log_fmt(info, "Unknown action request: %s\n", actionName.c_str());
 		UpnpActionRequest_set_ErrCode(request, 401);
 		UpnpString* errorString = UpnpString_new();
 		UpnpString_set_String(errorString, "Invalid Action");
@@ -248,13 +248,13 @@ void ContentDirectoryService::ExecuteAction(UpnpActionRequest* request)
 	int ret = ixmlParseBufferEx(responseXML.c_str(), &response);
 	if(ret != IXML_SUCCESS)
 	{
-		logger->Log_cc(error, 5, "[ContentDirectoryService] Error ", std::to_string(ret).c_str(), " converting response XML into document\n", responseXML.c_str(), "\n");
+		logger->Log_fmt(error, "[ContentDirectoryService] Error %s converting response XML into document\n%s\n", std::to_string(ret).c_str(), responseXML.c_str());
 	}
 	else
 	{
 		UpnpActionRequest_set_ActionResult(request, response);
 		DOMString finishedXML = ixmlDocumenttoString(response);
-		logger->Log_cc(debug, 3, "Finished response:\n", finishedXML, "\n");
+		logger->Log_fmt(debug, "Finished response:\n%s\n", finishedXML);
 		ixmlFreeDOMString(finishedXML);
 	}
 }

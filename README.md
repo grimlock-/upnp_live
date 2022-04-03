@@ -2,7 +2,10 @@ upnp_live
 =============
 A UPnP Media Server for relaying internet live streams. Also has basic file serving functionality.
 
-## Dependencies
+## Building
+* C++14 compliant compiler required
+* Autoconf eventually, for now just run `make`
+#### Dependencies
 * [libupnp](https://github.com/pupnp/pupnp) v1.8+
   * Only tested with versions 1.8.3 and 1.12.1
 * A program that prints AV data to stdout. Not neded for compilation, but required for core functionality until other handlers are implemented.

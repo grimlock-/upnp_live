@@ -16,46 +16,45 @@ namespace upnp_live {
 
 struct StreamHandle
 {
-	StreamHandle(std::size_t size, int filedescriptor, std::shared_ptr<Stream>& s) : fd(filedescriptor), len(size), buf_start(new char[size]), stream_obj(s)
+	StreamHandle(std::size_t size, std::shared_ptr<Stream>& s) : stream_name(s->Name), len(size), buf_start(new char[size]), stream_obj(s)
 	{
-		if(fd == 0)
-			throw std::invalid_argument("invalid file descriptor");
 		if(len == 0)
 			throw std::invalid_argument("invalid buffer size");
-		if(auto str = stream_obj.lock())
+		/*if(auto str = stream_obj.lock())
 			stream_name = str->Name;
 		else
-			throw std::invalid_argument("invalid stream object");
+			throw std::runtime_error("error  stream object");*/
 	}
 	~StreamHandle()
 	{
 		delete[] buf_start;
 	}
-	std::string stream_name;
-	const int fd;
+	const std::string stream_name;
 	const std::size_t len;
 	char * const buf_start;
 	int32_t tail = -1;
 	std::shared_timed_mutex rw_mutex;
 	std::weak_ptr<Stream> stream_obj;
+	bool finished {false};
 };
 
 struct ClientHandle
 {
-	ClientHandle(std::shared_ptr<StreamHandle>& hnd, unsigned int _id) : stream_handle(hnd), id(_id)
+	ClientHandle(std::shared_ptr<StreamHandle>& hnd, unsigned int _id) : id(_id), stream_name(hnd->stream_name), stream_handle(hnd)
 	{
 		std::shared_lock<std::shared_timed_mutex> rw_lock(hnd->rw_mutex);
 		head = hnd->tail;
-		stream_name = hnd->stream_name;
+		//stream_name = hnd->stream_name;
 	}
 	bool operator ==(const ClientHandle& other)
 	{
 		return other.id == id;
 	}
-	std::weak_ptr<StreamHandle> stream_handle;
+	const unsigned int id;
+	const std::string stream_name;
 	int32_t head;
-	unsigned int id;
-	std::string stream_name;
+	std::shared_ptr<StreamHandle> stream_handle;
+	bool IsValid {true};
 };
 
 /*
@@ -70,13 +69,13 @@ class MemoryStore : public AVStore
 		MemoryStore();
 		~MemoryStore();
 		void Heartbeat();
+		void GetAVData(std::shared_ptr<StreamHandle>& streamHandle);
+		unsigned int GetId();
 		//AVStore
 		void Shutdown();
 		UpnpWebFileHandle CreateHandle(std::shared_ptr<Stream>& stream);
-		int DestroyHandle(UpnpWebFileHandle hnd);
+		void DestroyHandle(UpnpWebFileHandle hnd);
 		int Read(UpnpWebFileHandle hnd, char* buf, std::size_t len);
-		void WriteToBuffer(std::shared_ptr<StreamHandle>& streamHandle);
-		unsigned int GetId();
 	private:
 		std::thread heartbeatThread;
 		std::atomic_flag alive = ATOMIC_FLAG_INIT;
@@ -86,8 +85,11 @@ class MemoryStore : public AVStore
 		std::shared_timed_mutex clientContainerMutex;
 		unsigned int uid = 0;
 		Logger* logger;
+		//Functions
+		std::shared_ptr<StreamHandle> CreateStreamHandle(std::shared_ptr<Stream>& stream);
+		void DestroyStreamHandle(std::string stream_name);
 };
 
 }
 
-#endif /* MEMORYSTORE_H */
+#endif

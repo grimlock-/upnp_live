@@ -35,7 +35,7 @@ void DirectoryMonitor::AddDirectory(std::string dir)
 	if(logger->GetLogLevel() >= debug)
 	{
 		std::string str = "[DM] New watch (";
-		str += std::to_string(watch_id);
+		str += watch_id;
 		str += "): ";
 		str += dir;
 		str += "\n";
@@ -56,7 +56,7 @@ void DirectoryMonitor::RemoveDirectory(int watch_id)
 	auto it = watches.find(watch_id);
 	if(it != watches.end())
 	{
-		logger->Log_cc(debug, 5, "[DM] Removed watch (", std::to_string(watch_id).c_str(), "): ", it->second.c_str(), "\n");
+		logger->Log_fmt(debug, "[DirectoryMonitor] Removed watch (%d): %s\n", watch_id, it->second.c_str());
 		watches.erase(it);
 	}
 }
@@ -171,7 +171,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 		{
 			//A dir_delete event is made in the parent's delete event instead of here
 			//to account for instances where a directory is created and instantly deleted
-			logger->Log_cc(debug, 3, "[DM] watch invalidated for ", filepath.c_str(), "\n");
+			logger->Log_fmt(debug, "[DirectoryMonitor] watch invalidated for %s\n", filepath.c_str());
 			RemoveDirectory(event->wd);
 		}
 		else if(creation)
@@ -179,7 +179,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 
 			if(isDirectory)
 			{
-				logger->Log_cc(debug, 3, "[DM] new directory: ", filepath.c_str(), "\n");
+				logger->Log_fmt(debug, "[DirectoryMonitor] new directory: %s\n", filepath.c_str());
 				DirectoryMonitorEvent e;
 				e.type = dir_create;
 				e.path = filepath;
@@ -187,7 +187,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 			}
 			else
 			{
-				logger->Log_cc(debug, 3, "[DM] File created: ", filepath.c_str(), "\n");
+				logger->Log_fmt(debug, "[DirectoryMonitor] File created: %s\n", filepath.c_str());
 				DirectoryMonitorEvent e;
 				e.type = file_create;
 				e.path = filepath;
@@ -199,7 +199,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 			if(isDirectory)
 			{
 				//This here will be the only way of making a delete event for a dir that's created and instantly deleted
-				logger->Log_cc(debug, 3, "[DM] directory deleted/renamed: ", filepath.c_str(), "\n");
+				logger->Log_fmt(debug, "[DirectoryMonitor] directory deleted/renamed: %s\n", filepath.c_str());
 				DirectoryMonitorEvent e;
 				e.type = dir_delete;
 				e.path = filepath;
@@ -207,7 +207,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 			}
 			else
 			{
-				logger->Log_cc(debug, 3, "[DM] file deleted/renamed: ", filepath.c_str(), "\n");
+				logger->Log_fmt(debug, "[DirectoryMonitor] file deleted/renamed: %s\n", filepath.c_str());
 				DirectoryMonitorEvent e;
 				e.type = file_delete;
 				e.path = filepath;
@@ -231,7 +231,7 @@ std::vector<DirectoryMonitorEvent> DirectoryMonitor::Update()
 			}
 			catch(std::system_error& e)
 			{
-				logger->Log_cc(error, 5, "Error creating watch for ", it->path.c_str(), ", the server will not react to filesystem chagnes in this directory\nError: ", e.what(), "\n");
+				logger->Log_fmt(error, "Error creating watch for %s, the server will not react to filesystem chagnes in this directory\nError: %s\n", it->path.c_str(), e.what());
 			}
 		}
 	}

@@ -45,9 +45,9 @@ void upnp_live::ParseArgument(std::string name, std::string value, InitOptions& 
 	if(name == "daemon" || name == "background")
 	{
 #ifdef UPNP_LIVE_DEBUG
-		std::cout << "daemon\n";
+		std::cout << "background\n";
 #endif
-		options.daemon = true;
+		options.background = true;
 		return;
 	}
 

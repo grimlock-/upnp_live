@@ -14,12 +14,12 @@ void ConnectionManagerService::ExecuteAction(UpnpActionRequest* request)
 	DOMString requestXML = ixmlDocumenttoString(UpnpActionRequest_get_ActionRequest(request));
 	if(requestXML == nullptr)
 	{
-		logger->Log_cc(error, 3, "[ConnectionManagerService] error converting action ", ActionName.c_str(), " to string\n");
+		logger->Log_fmt(error, "[ConnectionManagerService] error converting action %s to string\n", ActionName.c_str());
 		return;
 	}
 	else
 	{
-		logger->Log_cc(debug, 5, "[ConnectionManagerService] recieved action: ", ActionName.c_str(), "\n", requestXML, "\n");
+		logger->Log_fmt(debug, "[ConnectionManagerService] recieved action: %s\n%s\n", ActionName.c_str(), requestXML);
 		ixmlFreeDOMString(requestXML);
 	}
 
@@ -43,7 +43,7 @@ void ConnectionManagerService::ExecuteAction(UpnpActionRequest* request)
 	}
 	else
 	{
-		logger->Log_cc(error, 3, "Unknown action request: ", ActionName.c_str(), "\n");
+		logger->Log_fmt(error, "Unknown action request: %s\n", ActionName.c_str());
 		UpnpActionRequest_set_ErrCode(request, 401);
 		UpnpString* errorString = UpnpString_new();
 		UpnpString_set_String(errorString, "Invalid Action");
@@ -64,12 +64,12 @@ void ConnectionManagerService::ExecuteAction(UpnpActionRequest* request)
 
 	int ret = ixmlParseBufferEx(responseXML.c_str(), &response);
 	if(ret != IXML_SUCCESS)
-		logger->Log_cc(error, 5, "[ConnectionManagerService] Error ", std::to_string(ret).c_str(), " converting response XML into document\n", responseXML.c_str(), "\n");
+		logger->Log_fmt(error, "[ConnectionManagerService] Error %d converting response XML into document\n%s\n", ret, responseXML.c_str());
 	else
 	{
 		UpnpActionRequest_set_ActionResult(request, response);
 		DOMString finishedXML = ixmlDocumenttoString(response);
-		logger->Log_cc(debug, 3, "Finished response:\n", finishedXML, "\n");
+		logger->Log_fmt(debug, "Finished response:\n%s\n", finishedXML);
 		ixmlFreeDOMString(finishedXML);
 	}
 }

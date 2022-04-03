@@ -8,8 +8,11 @@ build_bin: CFLAGS += -O3
 build_bin: build_objs upnp_live
 build_objs: $(OBJECTS)
 
-test : src/test.cpp src/util.cpp src/util.h src/HttpRequest.cpp src/HttpRequest.h src/HttpStatusHandler.cpp src/HttpStatusHandler.h src/StatusHandler.h
-	g++ -std=c++14 -g src/util.cpp src/HttpStatusHandler.cpp src/HttpRequest.cpp src/test.cpp -lupnp -lixml -g -rdynamic -o test
+http_test : src/test.cpp src/util.cpp src/util.h src/HttpRequest.cpp src/HttpRequest.h src/HttpStatusHandler.cpp src/HttpStatusHandler.h src/StatusHandler.h
+	g++ -std=c++14 -g src/util.cpp src/HttpStatusHandler.cpp src/HttpRequest.cpp src/test.cpp -lupnp -lixml -g -rdynamic -o http_test
+
+util_test : src/test_util.cpp src/util.h src/util.cpp src/Logging.h src/Logging.cpp
+	g++ -std=c++14 -g src/test_util.cpp src/util.cpp src/Logging.cpp -g -rdynamic -o util_test
 
 upnp_live : $(OBJECTS)
 	$(CC) $(LARGS) $(OBJECTS) $(LIBS) -o upnp_live
@@ -70,8 +73,9 @@ debug: CFLAGS += -g -DUPNP_LIVE_DEBUG
 debug: LARGS += -g -rdynamic
 debug: build_objs upnp_live
 
+tests: http_test util_test
+
 .PHONY : clean
 clean :
 	rm -f *.o
-	rm -f upnp_live
-	rm -f test
+	rm -f upnp_live http_test util_test

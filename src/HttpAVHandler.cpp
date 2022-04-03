@@ -2,11 +2,11 @@
 
 using namespace upnp_live;
 
-HttpAVHandler::HttpAVHandler() : SourceType{http}
+/*HttpAVHandler::HttpAVHandler()
 {
-}
+}*/
 
-int HttpAVHandler::Init()
+void HttpAVHandler::Init()
 {
 	return 0;
 }

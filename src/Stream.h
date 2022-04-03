@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 #include <chrono>
-#include "AVSource.h"
+#include "AVHandler.h"
 #include "StatusHandler.h"
 #include "Transcoder.h"
 #include "Logging.h"
@@ -16,13 +16,13 @@ namespace upnp_live {
 
 enum AddStreamResult { success, fail, heartbeatFail };
 
-class Stream
+class Stream : public AVWriter
 {
 	public:
 		Stream(
 			std::string name,
 			std::string mt,
-			std::unique_ptr<AVSource>&& avh,
+			std::unique_ptr<AVHandler>&& avh,
 			std::unique_ptr<StatusHandler>&& sh,
 			std::unique_ptr<Transcoder>&& tr
 		);
@@ -32,19 +32,19 @@ class Stream
 		void UpdateStatus();
 		
 		void StartHeartbeat();
-		int StartAVHandler();
-		void StopAVHandler();
+		void Start();
+		void Stop();
 		void StopHeartbeat();
 		void SetStatusInterval(int);
 		
 		bool IsLive();
 		int GetChildCount();
 		int GetStatusInterval();
-		bool HasTranscoder();
-		//Other classes can simplify stuff for non-transcoded file sources
 		std::string GetFilePath();
 		void UpdateReadTime();
 		std::string GetMimeType();
+		//AVWriter
+		int Read(char* buf, size_t len);
 		
 		//Vars
 		const std::string Name;
@@ -52,9 +52,8 @@ class Stream
 	
 	protected:
 		const std::string mimeType;
-		//std::vector<std::string> resolutions;
 		std::atomic<bool> streamIsLive {false};
-		std::unique_ptr<AVSource> avHandler;
+		std::unique_ptr<AVHandler> avHandler;
 		std::unique_ptr<StatusHandler> statusHandler;
 		std::unique_ptr<Transcoder> transcoder;
 		std::thread heartbeatThread;
@@ -71,4 +70,4 @@ class Stream
 
 }
 
-#endif /* STREAM_H */
+#endif
